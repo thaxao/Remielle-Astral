@@ -18,10 +18,18 @@ GREEN="\033[32m"
 BLUE="\033[34m"
 CYAN="\033[36m"
 RED="\033[31m"
+YELLOW="\033[33m"
 
 say() { printf "${CYAN}==>${RESET} ${BOLD}%s${RESET}\n" "$*"; }
 ok()  { printf "${GREEN}  ✓${RESET} %s\n" "$*"; }
 die() { printf "${RED}error:${RESET} %s\n" "$*" >&2; exit 1; }
+
+# Concurrency Guard: prevent concurrent installer or uninstaller runs
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/remielle-astral-op.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  die "มีกระบวนการติดตั้งหรือถอนการติดตั้ง Remielle Astral กำลังทำงานอยู่แล้ว (Another install/uninstall process is currently running)"
+fi
 
 printf "${BOLD}${BLUE}"
 cat << 'EOF'
@@ -33,6 +41,27 @@ cat << 'EOF'
 EOF
 printf "${RESET}\n"
 say "Installing Remielle Astral for Linux..."
+
+# Check if already installed
+if [ -f "$INSTALL_DIR/remielle-astral" ]; then
+  if [ -t 0 ] || [ -e /dev/tty ]; then
+    printf "\n${YELLOW}${BOLD}ตรวจพบว่า Remielle Astral ถูกติดตั้งอยู่ในระบบแล้วที่:${RESET} %s\n" "$INSTALL_DIR"
+    read -r -p "ต้องการติดตั้งซ้ำ / อัปเดตทับไฟล์เดิมหรือไม่? [Y/n]: " REINSTALL </dev/tty || REINSTALL="y"
+    if [[ "$REINSTALL" =~ ^[Nn]$ ]]; then
+      say "ยกเลิกการติดตั้งเรียบร้อยแล้ว (Installation cancelled)"
+      exit 0
+    fi
+  else
+    say "Remielle Astral is already installed. Updating in-place..."
+  fi
+fi
+
+# Stop running process if running
+if pgrep -f "remielle-astral" >/dev/null 2>&1; then
+  say "Stopping running Remielle Astral process..."
+  pkill -f "remielle-astral" || true
+  sleep 1
+fi
 
 # Check requirements
 command -v curl >/dev/null 2>&1 || die "curl is required to install Remielle Astral"
@@ -90,10 +119,10 @@ ok "Created symlink: $BIN_DIR/remielle-astral"
 
 # Desktop integration
 mkdir -p "$APP_DIR" "$ICON_DIR"
-if [ -f "$INSTALL_DIR/src/static/icon.png" ]; then
-  cp "$INSTALL_DIR/src/static/icon.png" "$ICON_DIR/io.github.thaxao.RemielleAstral.png"
-elif [ -f "$INSTALL_DIR/icon.png" ]; then
+if [ -f "$INSTALL_DIR/icon.png" ]; then
   cp "$INSTALL_DIR/icon.png" "$ICON_DIR/io.github.thaxao.RemielleAstral.png"
+elif [ -f "$INSTALL_DIR/src/static/icon.png" ]; then
+  cp "$INSTALL_DIR/src/static/icon.png" "$ICON_DIR/io.github.thaxao.RemielleAstral.png"
 fi
 
 PRIME=""
@@ -105,22 +134,33 @@ cat << DESKTOP > "$APP_DIR/io.github.thaxao.RemielleAstral.desktop"
 [Desktop Entry]
 Type=Application
 Name=Remielle Astral
+GenericName=Zenless Zone Zero Launcher
 Comment=Remielle (Zenless Zone Zero) server launcher
 Exec=${PRIME}${BIN_DIR}/remielle-astral
 Path=${INSTALL_DIR}
 Icon=io.github.thaxao.RemielleAstral
 Terminal=false
-Categories=Game;
+Categories=Game;RolePlaying;ActionGame;
+Keywords=game;zenless;zzz;remielle;astral;server;launcher;
 StartupWMClass=io.github.thaxao.RemielleAstral
 StartupNotify=true
 DESKTOP
 chmod 644 "$APP_DIR/io.github.thaxao.RemielleAstral.desktop"
 
+# Refresh desktop application database for KDE, GNOME, XFCE
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+  kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+  kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
 fi
-ok "Registered desktop application menu shortcut"
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" >/dev/null 2>&1 || true
+fi
+ok "Registered desktop application menu shortcut (Game category)"
 
 printf "\n${GREEN}${BOLD}Installation completed successfully!${RESET}\n"
 printf "You can launch Remielle Astral by running:\n"
-printf "  ${BOLD}remielle-astral${RESET}  (or find it in your application menu)\n\n"
+printf "  ${BOLD}remielle-astral${RESET}  (or find it in your application menu under Games)\n\n"

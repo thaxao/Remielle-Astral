@@ -31,9 +31,24 @@ BOLD="\033[1m"
 GREEN="\033[32m"
 CYAN="\033[36m"
 YELLOW="\033[33m"
+RED="\033[31m"
 
 say() { printf "${CYAN}==>${RESET} ${BOLD}%s${RESET}\n" "$*"; }
 ok()  { printf "${GREEN}  ✓${RESET} %s\n" "$*"; }
+die() { printf "${RED}error:${RESET} %s\n" "$*" >&2; exit 1; }
+
+# Concurrency Guard: prevent concurrent installer or uninstaller runs
+LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/remielle-astral-op.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  die "มีกระบวนการติดตั้งหรือถอนการติดตั้ง Remielle Astral กำลังทำงานอยู่แล้ว (Another install/uninstall process is currently running)"
+fi
+
+# Duplicate Uninstall Guard: check if Remielle Astral is installed at all
+if [ ! -d "$INSTALL_DIR" ] && [ ! -L "$BIN_LINK" ] && [ ! -f "$BIN_LINK" ] && [ ! -f "$APP_DESKTOP" ] && [ ! -f "$APP_ICON" ]; then
+  say "ไม่พบการติดตั้ง Remielle Astral ในระบบ (Remielle Astral is not installed on this system)"
+  exit 0
+fi
 
 say "Uninstalling Remielle Astral..."
 
@@ -89,10 +104,15 @@ rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/io.github.thaxao.RemielleAstral" 2>
 
 # Refresh desktop application database for KDE and GNOME
 if command -v kbuildsycoca6 >/dev/null 2>&1; then
-  kbuildsycoca6 >/dev/null 2>&1 || true
+  kbuildsycoca6 --noincremental >/dev/null 2>&1 || true
+elif command -v kbuildsycoca5 >/dev/null 2>&1; then
+  kbuildsycoca5 --noincremental >/dev/null 2>&1 || true
 fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "${XDG_DATA_HOME:-$HOME/.local/share}/applications" >/dev/null 2>&1 || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -f -t "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor" >/dev/null 2>&1 || true
 fi
 
 printf "\n${GREEN}${BOLD}Remielle Astral has been uninstalled successfully.${RESET}\n\n"
