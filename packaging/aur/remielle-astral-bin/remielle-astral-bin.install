@@ -1,0 +1,17 @@
+post_install() {
+  cat <<'MSG'
+==> Remielle Astral: start it from the menu (Games) or with `remielle-astral`.
+==> Your settings, saves, Custom server and mods live in ~/.local/share/remielle-astral.
+==> Installed it before with tools/install.sh?  Run its uninstall.sh once (it keeps
+    that data), so its menu entry does not hide this one.
+==> This is a demo build: report bugs on Discord (the link is in the launcher).
+MSG
+}
+
+post_upgrade() {
+  echo "==> Remielle Astral updated; reopen it if it is running."
+}
+
+post_remove() {
+  echo "==> Your data in ~/.local/share/remielle-astral was left alone; delete it by hand if you want it gone."
+}

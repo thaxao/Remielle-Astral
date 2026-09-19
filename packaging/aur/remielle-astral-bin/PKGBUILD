@@ -1,0 +1,57 @@
+# Maintainer: thaxao <https://github.com/thaxao>
+#
+# The launcher lives in /opt/remielle-astral; each user's settings, caches,
+# Custom server and mods go to ~/.local/share/remielle-astral (the PACKAGED
+# file tells the launcher so, and turns its own updater off: pacman updates
+# it).  tools/aur-update in the repository bumps pkgver and the checksum.
+
+pkgname=remielle-astral-bin
+_pkgname=remielle-astral
+pkgver=1.1.2.b3.3.2alpha
+_ver=1.1.2.b3.3.2-alpha
+pkgrel=1
+pkgdesc="Launcher for the Remielle (Zenless Zone Zero) private server: servers, account editor, mods"
+arch=('x86_64')
+url="https://github.com/thaxao/Remielle-Astral"
+license=('Apache-2.0')
+depends=('gtk3' 'webkit2gtk-4.1' 'glib2' 'glibc' 'bash' 'curl' 'unzip')
+optdepends=('wine: start the game on Linux'
+            'git: the Official server and the Official client patch')
+provides=("$_pkgname")
+conflicts=("$_pkgname" "$_pkgname-git")
+options=('!strip' '!debug')
+install=remielle-astral-bin.install
+source=("$_pkgname-$_ver-linux-x86_64.zip::$url/releases/download/v$_ver/$_pkgname-$_ver-linux-x86_64.zip")
+sha256sums=('8f9488239e549f593857cae31e626f9112bd64384553b6ad40642a203b24019a')
+
+package() {
+  cd "$_pkgname-$_ver-linux-x86_64"
+
+  install -d "$pkgdir/opt/$_pkgname"
+  cp -r --no-preserve=ownership . "$pkgdir/opt/$_pkgname/"
+  # The curl installers and their file list belong to the other way of
+  # installing; pacman keeps its own.
+  rm -f "$pkgdir/opt/$_pkgname"/tools/{install,uninstall}.{sh,ps1,cmd} "$pkgdir/opt/$_pkgname/MANIFEST"
+  echo pacman >"$pkgdir/opt/$_pkgname/PACKAGED"
+  chmod 755 "$pkgdir/opt/$_pkgname/$_pkgname" "$pkgdir/opt/$_pkgname"/tools/*
+
+  install -d "$pkgdir/usr/bin"
+  ln -s "/opt/$_pkgname/$_pkgname" "$pkgdir/usr/bin/$_pkgname"
+
+  install -Dm644 icon.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/io.github.thaxao.RemielleAstral.png"
+  install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/io.github.thaxao.RemielleAstral.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Remielle Astral
+GenericName=Zenless Zone Zero Launcher
+Comment=Remielle (Zenless Zone Zero) server launcher
+Exec=$_pkgname
+Icon=io.github.thaxao.RemielleAstral
+Terminal=false
+Categories=Game;RolePlaying;ActionGame;
+Keywords=game;zenless;zzz;remielle;astral;server;launcher;
+StartupWMClass=io.github.thaxao.RemielleAstral
+StartupNotify=true
+DESKTOP
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

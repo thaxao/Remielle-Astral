@@ -17,11 +17,19 @@
 
 คุณสามารถติดตั้ง Remielle Astral ได้ทันทีผ่าน Terminal หรือ PowerShell โดยไม่ต้องคอมไพล์เอง:
 
-### 🐧 Linux (Bash)
+### 🐧 Linux (Bash - ทุกดิสโทร)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/install.sh | bash
 ```
 > *สคริปต์จะดาวน์โหลดตัวโปรแกรม, สร้าง Symlink ที่ `~/.local/bin/remielle-astral`, และสร้างไอคอนในเมนูโปรแกรม (Application Menu) ให้อัตโนมัติ*
+
+### 🏹 Arch Linux (PKGBUILD / Pacman)
+สำหรับผู้ใช้ Arch Linux ที่ต้องการติดตั้งเป็นระบบแพ็กเกจ:
+```bash
+git clone https://github.com/thaxao/Remielle-Astral.git
+cd Remielle-Astral/packaging/aur/remielle-astral-bin
+makepkg -si
+```
 
 ### 🪟 Windows (PowerShell)
 ```powershell
@@ -40,9 +48,13 @@ curl -fsSL https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/i
 
 สคริปต์ถอนการติดตั้งจะลบเฉพาะไฟล์ของลันเชอร์อย่างปลอดภัย และมีเมนูถามก่อนว่าต้องการลบการตั้งค่า (Settings/Config) ด้วยหรือไม่:
 
-* **Linux**:
+* **Linux (ติดตั้งด้วย curl)**:
   ```bash
   curl -fsSL https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/uninstall.sh | bash
+  ```
+* **Arch Linux (ติดตั้งด้วย makepkg)**:
+  ```bash
+  yay -R remielle-astral-bin   # หรือ sudo pacman -R remielle-astral-bin
   ```
 * **Windows (PowerShell)**:
   ```powershell

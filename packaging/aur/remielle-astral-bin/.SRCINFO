@@ -1,0 +1,26 @@
+pkgbase = remielle-astral-bin
+	pkgdesc = Launcher for the Remielle (Zenless Zone Zero) private server: servers, account editor, mods
+	pkgver = 1.1.2.b3.3.2alpha
+	pkgrel = 1
+	url = https://github.com/thaxao/Remielle-Astral
+	install = remielle-astral-bin.install
+	arch = x86_64
+	license = Apache-2.0
+	depends = gtk3
+	depends = webkit2gtk-4.1
+	depends = glib2
+	depends = glibc
+	depends = bash
+	depends = curl
+	depends = unzip
+	optdepends = wine: start the game on Linux
+	optdepends = git: the Official server and the Official client patch
+	provides = remielle-astral
+	conflicts = remielle-astral
+	conflicts = remielle-astral-git
+	options = !strip
+	options = !debug
+	source = remielle-astral-1.1.2.b3.3.2-alpha-linux-x86_64.zip::https://github.com/thaxao/Remielle-Astral/releases/download/v1.1.2.b3.3.2-alpha/remielle-astral-1.1.2.b3.3.2-alpha-linux-x86_64.zip
+	sha256sums = 8f9488239e549f593857cae31e626f9112bd64384553b6ad40642a203b24019a
+
+pkgname = remielle-astral-bin
