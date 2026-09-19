@@ -342,7 +342,7 @@ check_optional() {
 
 # ------------------------------------------------------------ menu entries --
 setup_menu() {
-  local exe="$DIR/remielle-astral" entry="$APP_DIR/$APP_ID.desktop" prime=""
+  local exe="$DIR/remielle-astral" entry="$APP_DIR/$APP_ID.desktop"
   mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR"
   if [ -e "$BIN_DIR/remielle-astral" ] && [ ! -L "$BIN_DIR/remielle-astral" ]; then
     warn "$(T "Left $BIN_DIR/remielle-astral alone: it is a file, not a link." "ไม่แตะ $BIN_DIR/remielle-astral เพราะเป็นไฟล์จริง ไม่ใช่ลิงก์")"
@@ -356,15 +356,15 @@ setup_menu() {
     cp "$entry" "$DIR/.remielle-cache/old-menu-entries/$APP_ID.desktop.$(date +%Y%m%d-%H%M%S)"
     note "$(T "The previous menu entry pointed elsewhere; a copy is in .remielle-cache/old-menu-entries" "เมนูเดิมชี้ไปที่อื่น เก็บสำเนาไว้ใน .remielle-cache/old-menu-entries")"
   fi
-  # NVIDIA hybrid laptops: draw the window on the NVIDIA GPU.
-  if command -v prime-run >/dev/null && [ -e /proc/driver/nvidia/version ]; then prime="prime-run "; fi
+  # No prime-run: the launcher draws on the GPU that drives the screen (on a
+  # hybrid laptop the NVIDIA one would leave the window blank).
   cat >"$entry" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Remielle Astral
 GenericName=Zenless Zone Zero Launcher
 Comment=Remielle (Zenless Zone Zero) server launcher
-Exec=${prime}"$exe"
+Exec="$exe"
 Path=$DIR
 Icon=$APP_ID
 Terminal=false
@@ -443,7 +443,18 @@ do_install() {
     note "$(T "Installed: an older build  →  $NEW_VERSION" "ที่ติดตั้ง: รุ่นเก่า  →  $NEW_VERSION")"
   elif [ -n "$have" ]; then
     note "$(T "Installed:" "ที่ติดตั้ง:") $have  →  $NEW_VERSION"
-    if [ "$have" = "$NEW_VERSION" ] && [ "$force" = 0 ]; then
+    # A release whose files were replaced keeps its number but is another
+    # build: the checksums tell them apart.
+    local installed_sha release_sha=""
+    installed_sha="$(sed -n 's/^sha256=//p' "$DIR/.install-info" 2>/dev/null | head -1)"
+    if [ -n "$zip_file" ]; then
+      release_sha="$(sha256sum "$zip_file" | cut -d' ' -f1)"
+    elif curl -fsSL --retry 2 --connect-timeout 20 -o "$TMP/SHA256SUMS" "$SUMS_URL" 2>/dev/null; then
+      release_sha="$(awk -v n="$ZIP_NAME" '{ f = $2; sub(/^\*/, "", f) } f == n { print $1; exit }' "$TMP/SHA256SUMS")"
+    fi
+    if [ "$have" = "$NEW_VERSION" ] && [ "$force" = 0 ] && [ -n "$installed_sha" ] && [ -n "$release_sha" ] && [ "$installed_sha" != "$release_sha" ]; then
+      note "$(T "Same version number, but the release holds a different build: installing it." "เลขเวอร์ชันเดิม แต่ไฟล์ใน release เป็น build ใหม่: ติดตั้งให้")"
+    elif [ "$have" = "$NEW_VERSION" ] && [ "$force" = 0 ]; then
       if ! ask "$(T "$have is already installed. Reinstall it?" "ติดตั้ง $have อยู่แล้ว ติดตั้งซ้ำไหม?")" n; then
         ok "$(T "Already up to date; nothing changed." "เป็นรุ่นล่าสุดอยู่แล้ว ไม่ได้เปลี่ยนอะไร")"
         return 0

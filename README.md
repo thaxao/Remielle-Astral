@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v1.1.2.b3.3.2--alpha-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-v1.1.3.b3.3.2--alpha-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20Windows-green.svg" alt="Platform">
   <img src="https://img.shields.io/badge/license-Apache--2.0-orange.svg" alt="License">
 </p>

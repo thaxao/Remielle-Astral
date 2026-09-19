@@ -398,7 +398,29 @@ function Invoke-Install([string]$Temp) {
         Note (T "Installed: an older build  ->  {0}" "\u0e17\u0e35\u0e48\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07: \u0e23\u0e38\u0e48\u0e19\u0e40\u0e01\u0e48\u0e32  ->  {0}" $rel.Version)
     } elseif ($have) {
         Note (T "Installed: {0}  ->  {1}" "\u0e17\u0e35\u0e48\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07: {0}  ->  {1}" $have $rel.Version)
-        if ($have -eq $rel.Version -and -not $Force) {
+        # A release whose files were replaced keeps its number but is another
+        # build: the checksums tell them apart.
+        $installedSha = ""
+        $infoPath = Join-Path $Dir ".install-info"
+        if (Test-Path -LiteralPath $infoPath) {
+            foreach ($line in Get-Content -LiteralPath $infoPath) { if ($line -like "sha256=*") { $installedSha = $line.Substring(7) } }
+        }
+        $releaseSha = ""
+        try {
+            if ($Zip) { $releaseSha = (Get-FileHash -LiteralPath $zipFull -Algorithm SHA256).Hash.ToLower() }
+            elseif ($rel.SumsUrl) {
+                $early = Join-Path $Temp "SHA256SUMS.early"
+                Get-File $rel.SumsUrl $early
+                foreach ($line in Get-Content -LiteralPath $early) {
+                    $parts = $line.Trim() -split '\s+', 2
+                    if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -eq $rel.Name) { $releaseSha = $parts[0].ToLower() }
+                }
+            }
+        } catch { }
+        $rebuilt = $have -eq $rel.Version -and $installedSha -and $releaseSha -and ($installedSha -ne $releaseSha)
+        if ($rebuilt -and -not $Force) {
+            Note (T "Same version number, but the release holds a different build: installing it." "\u0e40\u0e25\u0e02\u0e40\u0e27\u0e2d\u0e23\u0e4c\u0e0a\u0e31\u0e19\u0e40\u0e14\u0e34\u0e21 \u0e41\u0e15\u0e48\u0e44\u0e1f\u0e25\u0e4c\u0e43\u0e19 release \u0e40\u0e1b\u0e47\u0e19 build \u0e43\u0e2b\u0e21\u0e48: \u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07\u0e43\u0e2b\u0e49")
+        } elseif ($have -eq $rel.Version -and -not $Force) {
             if (-not (Ask (T "{0} is already installed. Reinstall it?" "\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07 {0} \u0e2d\u0e22\u0e39\u0e48\u0e41\u0e25\u0e49\u0e27 \u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07\u0e0b\u0e49\u0e33\u0e44\u0e2b\u0e21?" $have) $false)) {
                 Ok (T "Already up to date; nothing changed." "\u0e40\u0e1b\u0e47\u0e19\u0e23\u0e38\u0e48\u0e19\u0e25\u0e48\u0e32\u0e2a\u0e38\u0e14\u0e2d\u0e22\u0e39\u0e48\u0e41\u0e25\u0e49\u0e27 \u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e40\u0e1b\u0e25\u0e35\u0e48\u0e22\u0e19\u0e2d\u0e30\u0e44\u0e23")
                 return
