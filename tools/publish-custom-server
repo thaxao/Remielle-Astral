@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# Packs the Custom Remielle server as ready-made builds the launcher can
+# install and update (Updates -> Server edition -> Custom).
+#
+#   tools/publish-custom-server <server-checkout> [options]
+#
+#   --version V     version of this build (default: <build.zig.zon version>-custom.<YYYYMMDD>)
+#   --out DIR       where the zips go (default: .remielle-cache/release/server-v<version>)
+#   --publish       upload with gh to the launcher's repository
+#   --repo O/N      GitHub repository for --publish (default: thaxao/Remielle-Astral)
+#   --tag T         release tag for --publish (default: server-v<version>); an
+#                   existing release with that tag gets the files added
+#
+# Builds the checkout for Linux and Windows (ReleaseSafe) with the Zig version
+# its envrc pins, and stages per platform:
+#
+#   remielle-server-<version>-<platform>/
+#     edition.json                      what the launcher reads (version, base)
+#     zig-out/bin/remielle-{gamesv,dpsv,sdksv}[.exe], rmctl[.exe]
+#     gamesv|dpsv|sdksv/config.zon      ports the launcher shows (the servers
+#                                       have these compiled in)
+#     assets/filecfg/*.zon              game data the account pages read
+#     rmpb/src/pb.stable.zig            save schema the account pages read
+#     rmctl/src/rand_properties.zig     Drive Disc stat table
+#     LICENSE
+#
+# and writes remielle-server-<version>-<platform>.zip plus SERVER-SHA256SUMS.
+# The launcher refuses a download whose checksum is missing or wrong.
+#
+# The checkout must carry rmnet.custom_edition (the "remielle-custom-edition
+# features=..." text); without it the launcher sees an Official build and
+# keeps Real-time locked, so the script stops early.
+
+set -euo pipefail
+# Dates and versions in the Gregorian calendar, whatever the desktop locale.
+export LC_ALL=C
+
+say() { printf '%s\n' "$*"; }
+die() { say "error: $*" >&2; exit 1; }
+
+here="$(cd "$(dirname "$0")/.." && pwd)"
+src=""
+version=""
+out=""
+publish=0
+repo="thaxao/Remielle-Astral"
+tag=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --version) version="$2"; shift 2 ;;
+    --out) out="$2"; shift 2 ;;
+    --publish) publish=1; shift ;;
+    --repo) repo="$2"; shift 2 ;;
+    --tag) tag="$2"; shift 2 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) die "unknown option $1" ;;
+    *) [ -z "$src" ] || die "one checkout only"; src="$1"; shift ;;
+  esac
+done
+[ -n "$src" ] || die "usage: tools/publish-custom-server <server-checkout> [--version V] [--publish]"
+src="$(cd "$src" && pwd)"
+for f in build.zig build.zig.zon gamesv/config.zon dpsv/config.zon sdksv/config.zon rmnet/src/root.zig; do
+  [ -f "$src/$f" ] || die "$src is not a Remielle checkout ($f is missing)"
+done
+mark="$(grep -o 'remielle-custom-edition features=[A-Za-z0-9_,-]*' "$src/rmnet/src/root.zig" | head -1 || true)"
+[ -n "$mark" ] || die "rmnet/src/root.zig has no custom_edition mark; this would ship as an Official build"
+features="${mark#remielle-custom-edition features=}"
+
+zig_version="$(sed -n 's/^ZIG_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$src/envrc" | head -1)"
+[ -n "$zig_version" ] || die "envrc names no ZIG_VERSION"
+zig="${ZIG_SERVER:-$src/.direnv/zig-x86_64-linux-$zig_version/zig}"
+[ -x "$zig" ] || zig="$(command -v zig || true)"
+[ -n "$zig" ] && [ "$("$zig" version)" = "$zig_version" ] || die "Zig $zig_version is needed (run the checkout's envrc once, or set ZIG_SERVER)"
+
+zon_version="$(sed -n 's/^ *\.version *= *"\([^"]*\)".*/\1/p' "$src/build.zig.zon" | head -1)"
+[ -n "$version" ] || version="${zon_version:-0.0.0}-custom.$(date +%Y%m%d)"
+case "$version" in *[!A-Za-z0-9._-]*) die "version $version has characters a file name should not" ;; esac
+[ -n "$tag" ] || tag="server-v$version"
+[ -n "$out" ] || out="$here/.remielle-cache/release/server-v$version"
+branch="$(git -C "$src" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+head="$(git -C "$src" rev-parse HEAD 2>/dev/null || echo "")"
+base="$(git -C "$src" merge-base HEAD "@{upstream}" 2>/dev/null || echo "$head")"
+
+command -v zip >/dev/null || die "zip is needed"
+if [ -e "$out" ]; then
+  mv "$out" "$out.old-$(date +%Y%m%d-%H%M%S)"
+fi
+mkdir -p "$out"
+work="$out/.work"
+
+say "Custom server $version from $src ($branch @ ${head:0:7}, base ${base:0:7})"
+say "features: $features"
+
+for platform in linux-x86_64 windows-x86_64; do
+  case "$platform" in
+    linux-x86_64) target=x86_64-linux-gnu; ext="" ;;
+    windows-x86_64) target=x86_64-windows-gnu; ext=".exe" ;;
+  esac
+  name="remielle-server-$version-$platform"
+  stage="$work/$name"
+  prefix="$work/prefix-$platform"
+  say "[$platform] building"
+  (cd "$src" && "$zig" build -Doptimize=ReleaseSafe -Dtarget="$target" --prefix "$prefix") || die "build for $platform failed"
+
+  mkdir -p "$stage/zig-out/bin" "$stage/assets/filecfg" "$stage/gamesv" "$stage/dpsv" "$stage/sdksv"
+  for bin in remielle-gamesv remielle-dpsv remielle-sdksv rmctl; do
+    [ -f "$prefix/bin/$bin$ext" ] || die "$bin$ext is missing after the $platform build (is rmctl installed by build.zig?)"
+    cp "$prefix/bin/$bin$ext" "$stage/zig-out/bin/"
+  done
+  grep -q "remielle-custom-edition features=" "$stage/zig-out/bin/remielle-gamesv$ext" || die "the $platform gamesv does not carry the custom_edition mark (is it logged in gamesv/src/main.zig?)"
+  cp "$src"/assets/filecfg/*.zon "$stage/assets/filecfg/"
+  for sv in gamesv dpsv sdksv; do cp "$src/$sv/config.zon" "$stage/$sv/"; done
+  [ -f "$src/LICENSE" ] && cp "$src/LICENSE" "$stage/"
+  cat > "$stage/edition.json" <<EOF
+{
+  "edition": "custom",
+  "version": "$version",
+  "features": "$features",
+  "platform": "$platform",
+  "server_branch": "$branch",
+  "base_commit": "$base",
+  "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  (cd "$work" && zip -qr -X "$out/$name.zip" "$name")
+  say "[$platform] $name.zip ($(du -h "$out/$name.zip" | cut -f1))"
+done
+rm -rf "$work"
+
+(cd "$out" && sha256sum remielle-server-*.zip > SERVER-SHA256SUMS)
+say "wrote $out"
+cat "$out/SERVER-SHA256SUMS"
+
+if [ "$publish" = 1 ]; then
+  command -v gh >/dev/null || die "gh is needed for --publish"
+  files=("$out"/remielle-server-*.zip "$out/SERVER-SHA256SUMS")
+  if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+    gh release upload "$tag" "${files[@]}" --repo "$repo" --clobber
+  else
+    gh release create "$tag" "${files[@]}" --repo "$repo" \
+      --title "Remielle Custom server $version" \
+      --notes "Custom Remielle server $version for Remielle Astral (features: $features). Install or update it from Updates -> Server edition."
+  fi
+  say "published $tag to $repo"
+fi

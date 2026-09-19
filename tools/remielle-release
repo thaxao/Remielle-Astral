@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# Packs the launcher for a public release: one zip per platform plus the
+# SHA256SUMS file the in-app updater checks.
+#
+#   tools/remielle-release [tag] [--publish]
+#
+# The tag defaults to v<version from src/main.zig>.  --publish also uploads
+# the files to GitHub with `gh release create`, which needs `gh auth login`.
+#
+# Each zip holds one program -- the launcher and its window in one file, the
+# pages built in -- plus tools/ (the server updater and the Official patch
+# builder), README and LICENSE.  The Custom server ships as its own zips
+# (tools/publish-custom-server).  The in-app updater copies a zip's folder over the installed one.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+zig="${ZIG:-$([ -x "$HOME/.zvm/0.14.0/zig" ] && echo "$HOME/.zvm/0.14.0/zig" || command -v zig)}"
+tag=""
+publish=0
+for arg in "$@"; do
+  case "$arg" in
+    --publish) publish=1 ;;
+    -*) echo "unknown option: $arg" >&2; exit 2 ;;
+    *) tag="$arg" ;;
+  esac
+done
+
+# LAUNCHER.bGAME-stage from the three constants in src/main.zig.
+zig_const() { sed -n "s/^pub const $1 = \"\\([^\"]*\\)\";.*/\\1/p" src/main.zig | head -1; }
+launcher_version="$(zig_const launcher_version)"
+game_version="$(zig_const game_version)"
+stage="$(zig_const stage)"
+[ -n "$launcher_version" ] && [ -n "$game_version" ] || { echo "cannot read launcher_version/game_version from src/main.zig" >&2; exit 1; }
+version="$launcher_version.b$game_version${stage:+-$stage}"
+zon_version="$(sed -n 's/^ *\.version *= *"\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
+if [ "$zon_version" != "$launcher_version-b$game_version${stage:+-$stage}" ]; then
+  echo "warning: build.zig.zon says $zon_version; set it to $launcher_version-b$game_version${stage:+-$stage} (zon wants semver)" >&2
+fi
+[ -n "$tag" ] || tag="v$version"
+name="${tag#v}"
+
+repo="${REMIELLE_REPO:-thaxao/Remielle-Astral}"
+
+say() { printf '%s\n' "$*"; }
+
+say "Remielle Astral $version -> release $tag"
+if [ "${tag#v}" != "$version" ]; then
+  say "warning: the tag does not match .version; the updater compares versions, so users on $version will only see $tag as newer if it sorts above it"
+fi
+
+out="$root/.remielle-cache/release/$tag"
+rm -rf "$out"
+mkdir -p "$out"
+
+say "[1/4] Building (ReleaseFast)"
+"$zig" build -Doptimize=ReleaseFast
+
+linux_exe="zig-out/bin/remielle-astral"
+win_exe="zig-out/bin/remielle-astral.exe"
+[ -f "$linux_exe" ] || { echo "missing $linux_exe" >&2; exit 1; }
+[ -f "$win_exe" ] || { echo "missing $win_exe (the build should cross-compile it)" >&2; exit 1; }
+built="$("$linux_exe" --version 2>/dev/null || true)"
+[ "$built" = "$version" ] || { echo "the built launcher says '$built', not $version" >&2; exit 1; }
+
+stage() { # stage <platform>
+  local plat="$1" dir="$out/stage-$1/remielle-astral-$name-$1"
+  rm -rf "$out/stage-$1"
+  mkdir -p "$dir/tools" "$dir/patch"
+  for t in remielle-update build-official-patch install.sh install.ps1 install.cmd uninstall.sh uninstall.ps1 uninstall.cmd; do
+    if [ -f "tools/$t" ]; then
+      install -m 755 "tools/$t" "$dir/tools/"
+    fi
+  done
+  if [ -f "src/patch/Pryce.exe" ]; then install -m 755 "src/patch/Pryce.exe" "$dir/patch/"; fi
+  if [ -f "src/patch/Armorer.dll" ]; then install -m 644 "src/patch/Armorer.dll" "$dir/patch/"; fi
+  install -m 644 README.md LICENSE "$dir/"
+  if [ -f "src/static/icon.png" ]; then install -m 644 "src/static/icon.png" "$dir/icon.png"; fi
+  case "$plat" in
+    linux-x86_64)
+      install -m 755 "$linux_exe" "$dir/remielle-astral"
+      if [ -f "tools/hpack" ]; then install -m 755 "tools/hpack" "$dir/tools/hpack"; fi
+      ;;
+    windows-x86_64)
+      install -m 755 "$win_exe" "$dir/remielle-astral.exe"
+      if [ -f "tools/hpack.exe" ]; then install -m 755 "tools/hpack.exe" "$dir/tools/hpack.exe"; fi
+      ;;
+  esac
+  # The program's own files, so the uninstallers remove exactly these and
+  # leave settings, saves and mods alone.  The in-app updater copies it too.
+  ( cd "$dir" && { find . -type f | sed 's|^\./||'; echo MANIFEST; } | LC_ALL=C sort -u > MANIFEST )
+  printf '%s' "$dir"
+}
+
+say "[2/4] Staging files"
+for plat in linux-x86_64 windows-x86_64; do
+  stage "$plat" >/dev/null
+done
+
+say "[3/4] Zipping"
+cd "$out"
+: > SHA256SUMS
+for plat in linux-x86_64 windows-x86_64; do
+  zipname="remielle-astral-$name-$plat.zip"
+  rm -f "$zipname"
+  ( cd "stage-$plat" && zip -q -r -X "../$zipname" "remielle-astral-$name-$plat" )
+  sha256sum "$zipname" >> SHA256SUMS
+  say "  $zipname  $(du -h "$zipname" | cut -f1)"
+done
+rm -rf stage-linux-x86_64 stage-windows-x86_64
+say "  SHA256SUMS"
+
+say "[4/4] $out"
+if [ "$publish" = 1 ]; then
+  command -v gh >/dev/null || { echo "gh is not installed; upload the files in $out by hand" >&2; exit 1; }
+  [ -n "$repo" ] || { echo "cannot read update.launcher_repo from src/settings.zig" >&2; exit 1; }
+  say "Publishing $tag to $repo"
+  notes="Remielle Astral $version"
+  gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" \
+    "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+else
+  say "To publish:"
+  say "  gh release create $tag --repo ${repo:-<owner>/<repo>} --title \"Remielle Astral $version\" \\"
+  say "    $out/remielle-astral-$name-linux-x86_64.zip \\"
+  say "    $out/remielle-astral-$name-windows-x86_64.zip \\"
+  say "    $out/SHA256SUMS"
+fi

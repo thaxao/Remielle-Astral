@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Brings packaging/aur/remielle-astral-bin up to the version in src/main.zig:
+# pkgver, the checksum of the Linux zip (from the release's SHA256SUMS) and
+# .SRCINFO.  With --push it also commits and pushes to the AUR, which needs an
+# AUR account with your SSH key.
+#
+#   tools/aur-update            update the files here
+#   tools/aur-update --push     and publish them to aur.archlinux.org
+#
+# Publish the GitHub release first: the AUR package downloads its zip.
+set -euo pipefail
+export LC_ALL=C
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+pkg="$root/packaging/aur/remielle-astral-bin"
+repo="${REMIELLE_REPO:-thaxao/Remielle-Astral}"
+push=0
+[ "${1:-}" = --push ] && push=1
+
+zig_const() { sed -n "s/^pub const $1 = \"\\([^\"]*\\)\";.*/\\1/p" "$root/src/main.zig" | head -1; }
+lv="$(zig_const launcher_version)" gv="$(zig_const game_version)" st="$(zig_const stage)"
+ver="$lv.b$gv${st:+-$st}"
+# pacman orders "1.1.2.b3.3.2alpha" before "1.1.2.b3.3.2"; with "_alpha" it
+# would not, so the stage is written straight after the numbers.
+pkgver="$lv.b$gv$st"
+zip="remielle-astral-$ver-linux-x86_64.zip"
+
+sums="$root/.remielle-cache/release/v$ver/SHA256SUMS"
+if [ -f "$sums" ]; then
+  sum="$(awk -v n="$zip" '$2 == n { print $1 }' "$sums")"
+else
+  sum="$(curl -fsSL "https://github.com/$repo/releases/download/v$ver/SHA256SUMS" | awk -v n="$zip" '$2 == n { print $1 }')"
+fi
+[ -n "$sum" ] || { echo "no checksum for $zip (pack or publish the release first)" >&2; exit 1; }
+
+old="$(sed -n 's/^pkgver=//p' "$pkg/PKGBUILD")"
+sed -i -e "s/^pkgver=.*/pkgver=$pkgver/" -e "s/^_ver=.*/_ver=$ver/" \
+       -e "s/^sha256sums=.*/sha256sums=('$sum')/" "$pkg/PKGBUILD"
+[ "$old" = "$pkgver" ] || sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkg/PKGBUILD"
+(cd "$pkg" && makepkg --printsrcinfo >.SRCINFO)
+echo "remielle-astral-bin $pkgver ($zip $sum)"
+
+if [ "$push" = 1 ]; then
+  work="$root/.remielle-cache/aur/remielle-astral-bin"
+  if [ -d "$work/.git" ]; then git -C "$work" pull -q --ff-only
+  else mkdir -p "$(dirname "$work")" && git clone -q ssh://aur@aur.archlinux.org/remielle-astral-bin.git "$work"
+  fi
+  cp "$pkg/PKGBUILD" "$pkg/.SRCINFO" "$pkg/remielle-astral-bin.install" "$work/"
+  git -C "$work" add PKGBUILD .SRCINFO remielle-astral-bin.install
+  if git -C "$work" diff --cached --quiet; then
+    echo "the AUR already has this version"
+  else
+    git -C "$work" commit -q -m "Update to $pkgver"
+    git -C "$work" push -q origin HEAD:master
+    echo "pushed to https://aur.archlinux.org/packages/remielle-astral-bin"
+  fi
+fi

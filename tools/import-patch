@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Brings the client patch (Pryce.exe + Armorer.dll) from a thaumiel checkout
+# into the launcher, so the built app carries the newest patch to install.
+#
+#   tools/import-patch                    # looks next to this tree (../thaumiel)
+#   tools/import-patch /path/to/thaumiel/zig-out/bin
+#
+# Rebuild the patch first (cd ../thaumiel && zig build -Doptimize=ReleaseSmall),
+# then run this, then `zig build` — the launcher embeds what is in src/patch.
+set -euo pipefail
+
+here="$(cd "$(dirname "$0")/.." && pwd)"
+src="${1:-$here/../thaumiel/zig-out/bin}"
+dst="$here/src/patch"
+
+if [ ! -f "$src/Pryce.exe" ] || [ ! -f "$src/Armorer.dll" ]; then
+  echo "error: Pryce.exe / Armorer.dll not found in: $src" >&2
+  echo "       build the patch first, or pass the bin folder as the first argument." >&2
+  exit 1
+fi
+
+# A foreign build renamed over the real one would fail these marks, which are
+# the same marks the launcher uses to verify an installed patch.
+for mark in custom.uid offsets.zon Armorer.dll; do
+  if ! grep -qa "$mark" "$src/Armorer.dll"; then
+    echo "error: $src/Armorer.dll does not look like a Remielle patch (no '$mark')." >&2
+    exit 1
+  fi
+done
+for mark in ZenlessZoneZeroBeta.exe offsets.zon; do
+  if ! grep -qa "$mark" "$src/Pryce.exe"; then
+    echo "error: $src/Pryce.exe does not look like a Remielle launcher (no '$mark')." >&2
+    exit 1
+  fi
+done
+
+mkdir -p "$dst"
+install -m 644 "$src/Pryce.exe" "$dst/Pryce.exe"
+install -m 644 "$src/Armorer.dll" "$dst/Armorer.dll"
+echo "Imported the patch into src/patch/:"
+ls -la "$dst"
+echo "Now run: zig build"
