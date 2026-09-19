@@ -22,7 +22,7 @@ conflicts=("$_pkgname" "$_pkgname-git")
 options=('!strip' '!debug')
 install=remielle-astral-bin.install
 source=("$_pkgname-$_ver-linux-x86_64.zip::$url/releases/download/v$_ver/$_pkgname-$_ver-linux-x86_64.zip")
-sha256sums=('4498ab80e5b288f1322bcde4d95583c6cfb1c737aaffe084cc72beb9fd019874')
+sha256sums=('405d098b233f2ca479462557538c6aa3726fbbbeeb7ffcbaeb354880e4db00cb')
 
 package() {
   cd "$_pkgname-$_ver-linux-x86_64"

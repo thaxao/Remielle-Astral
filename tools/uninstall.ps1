@@ -76,9 +76,14 @@ function Get-Size([string]$Path) {
 }
 
 function Test-Inside([string]$Path) {
-    $full = [IO.Path]::GetFullPath($Path)
-    $root = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    return $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+    if (-not $Path -or $Path.Trim().Length -eq 0) { return $false }
+    try {
+        $full = [IO.Path]::GetFullPath($Path)
+        $root = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        return $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)
+    } catch {
+        return $false
+    }
 }
 
 # Deletes a path inside the install folder, or only says so with -DryRun.
@@ -102,9 +107,14 @@ function Get-ProgramFiles {
 # Processes whose program lives under $Folder (by path, so nothing else is
 # touched).
 function Get-ProcessesUnder([string]$Folder) {
-    $root = [IO.Path]::GetFullPath($Folder).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        try { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    if (-not $Folder -or $Folder.Trim().Length -eq 0) { return @() }
+    try {
+        $root = [IO.Path]::GetFullPath($Folder).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+        return @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            try { $_.Path -and $_.Path.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+        })
+    } catch {
+        return @()
     }
 }
 
@@ -132,7 +142,11 @@ function Invoke-Main {
         if (-not $env:LOCALAPPDATA) { Fail "LOCALAPPDATA is not set" }
         $script:Dir = Join-Path $env:LOCALAPPDATA "Remielle-Astral"
     }
-    $script:Dir = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+    try {
+        $script:Dir = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+    } catch {
+        Fail "Invalid directory: $Dir"
+    }
     foreach ($bad in @($env:LOCALAPPDATA, $env:APPDATA, $env:USERPROFILE, $env:SystemRoot, $env:ProgramFiles, [IO.Path]::GetPathRoot($Dir))) {
         if ($bad -and $Dir.TrimEnd('\', '/') -ieq $bad.TrimEnd('\', '/')) { Fail "refusing to work on $Dir" }
     }
@@ -155,7 +169,11 @@ function Invoke-Main {
     $hasProgram = (Test-Path -LiteralPath (Join-Path $Dir "remielle-astral.exe")) -or (Test-Path -LiteralPath (Join-Path $Dir "Remielle Astral.exe")) -or
         (Test-Path -LiteralPath (Join-Path $Dir "MANIFEST")) -or (Test-Path -LiteralPath (Join-Path $Dir ".install-info"))
     $hasApp = Test-Path -Path $AppKey
-    $ourLinks = @($links | Where-Object { (Test-Path -LiteralPath $_) -and (Test-Inside (Get-ShortcutTarget $_)) })
+    $ourLinks = @($links | Where-Object {
+        if (-not (Test-Path -LiteralPath $_)) { return $false }
+        $tgt = Get-ShortcutTarget $_
+        return ($tgt -and (Test-Inside $tgt))
+    })
     if (-not $hasProgram -and -not $hasApp -and $ourLinks.Count -eq 0 -and (-not $Purge -or -not (Test-Path -LiteralPath $Dir))) {
         Say (T "Remielle Astral is not installed in {0}." "\u0e44\u0e21\u0e48\u0e1e\u0e1a Remielle Astral \u0e43\u0e19 {0}" $Dir)
         return
