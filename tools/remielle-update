@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# Brings a Remielle checkout up to date with its upstream branch and rebuilds
+# the servers, or rebuilds / rolls back without pulling.
+#
+#   remielle-update install  <server-dir> [repository] [branch]
+#   remielle-update update   <server-dir>
+#   remielle-update rebase   <server-dir>   (your own commits, replayed on top)
+#   remielle-update rebuild  <server-dir>
+#   remielle-update rollback <server-dir> <commit>
+#
+# install clones the server the way its README says to
+# (git clone -b 0.1.x https://git.xeondev.com/remielle/remielle.git) into a
+# folder that does not exist yet or is empty, then builds it.
+#
+# Environment:
+#   OPTIMIZE       Debug | ReleaseSafe | ReleaseFast | ReleaseSmall (default ReleaseSafe)
+#   BUILD_RECORD   JSON file to record the built commit in (optional)
+#
+# Prints "[N/M] title" once per stage, which the launcher draws its progress
+# from.  Exit status: 0 done, 2 bad arguments, 3 refused (local changes in the
+# way, diverged history), 4 build failed (source was rolled back), 5 other.
+
+set -uo pipefail
+
+mode="${1:-}"
+dir="${2:-}"
+target="${3:-}"
+optimize="${OPTIMIZE:-ReleaseSafe}"
+record="${BUILD_RECORD:-}"
+
+say() { printf '%s\n' "$*"; }
+die() { say "error: $1"; exit "${2:-5}"; }
+
+case "$mode" in
+  install|update|rebase|rebuild|rollback) ;;
+  *) die "usage: remielle-update install|update|rebase|rebuild|rollback <server-dir> [commit | repository branch]" 2 ;;
+esac
+case "$optimize" in Debug|ReleaseSafe|ReleaseFast|ReleaseSmall) ;; *) die "unknown OPTIMIZE: $optimize" 2 ;; esac
+
+if [ "$mode" = install ]; then
+  repo="${3:-https://git.xeondev.com/remielle/remielle.git}"
+  branch="${4:-0.1.x}"
+  [ -n "$dir" ] || die "no folder given" 2
+  case "$dir" in /*) ;; *) die "the folder must be an absolute path: $dir" 2 ;; esac
+  if [ -e "$dir" ] && [ -n "$(ls -A "$dir" 2>/dev/null)" ]; then
+    die "$dir already exists and is not empty; nothing was changed" 3
+  fi
+  say "[plan] Clone server|Prepare Zig|Build servers|Verify"
+  say "[1/4] Clone server"
+  mkdir -p "$(dirname "$dir")" || die "cannot create $(dirname "$dir")" 5
+  say "git clone -b $branch $repo $dir"
+  if ! git clone --progress -b "$branch" "$repo" "$dir" 2>&1 | tr '\r' '\n' | awk 'NF && !/(Receiving|Resolving|Counting|Compressing) objects: +[0-9]+% \(/ || /100% \(/'; then
+    rm -rf "$dir"
+    die "git clone failed; nothing was left behind" 5
+  fi
+  [ -f "$dir/build.zig" ] && [ -f "$dir/gamesv/config.zon" ] || { rm -rf "$dir"; die "$repo ($branch) does not look like Remielle" 5; }
+  git -C "$dir" --no-pager log -1 --format='Cloned %h %s'
+  mode=install_build
+fi
+
+[ -n "$dir" ] && [ -d "$dir" ] || die "server folder not found: $dir" 2
+cd "$dir" || die "cannot enter $dir" 2
+[ -f build.zig ] && [ -f gamesv/config.zon ] || die "$dir does not look like a Remielle checkout" 2
+
+case "$mode" in
+  install_build) stages=("Clone server" "Prepare Zig" "Build servers" "Verify") ;;
+  update)   stages=("Fetch upstream" "Check local changes" "Fast-forward" "Prepare Zig" "Build servers" "Verify") ;;
+  rebase)   stages=("Fetch upstream" "Check local changes" "Replay local commits" "Prepare Zig" "Build servers" "Verify") ;;
+  rebuild)  stages=("Prepare Zig" "Build servers" "Verify") ;;
+  rollback) stages=("Check local changes" "Move back" "Prepare Zig" "Build servers" "Verify") ;;
+esac
+total=${#stages[@]}
+step=0
+stage() { step=$((step + 1)); say "[$step/$total] ${stages[$((step - 1))]}"; }
+if [ "$mode" = install_build ]; then step=1; else (IFS='|'; say "[plan] ${stages[*]}"); fi
+
+before="$(git rev-parse HEAD 2>/dev/null)" || die "not a git checkout" 5
+
+# ---------------------------------------------------------------- fetch --
+upstream=""
+if [ "$mode" = update ] || [ "$mode" = rebase ]; then
+  stage
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null)" ||
+    die "branch $(git rev-parse --abbrev-ref HEAD) does not track a remote branch" 3
+  remote="${upstream%%/*}"
+  remote_branch="${upstream#*/}"
+  say "Fetching $remote_branch from $(git remote get-url "$remote")"
+  timeout 120 git fetch --no-tags "$remote" "+refs/heads/$remote_branch:refs/remotes/$remote/$remote_branch" 2>&1 ||
+    die "fetch failed; nothing was changed" 5
+  behind="$(git rev-list --count "HEAD..$upstream")"
+  ahead="$(git rev-list --count "$upstream..HEAD")"
+  say "$behind new commit(s), $ahead local commit(s)"
+  if [ "$ahead" -gt 0 ] && [ "$behind" -gt 0 ] && [ "$mode" = update ]; then
+    die "local commits and upstream have diverged; use Update by rebasing, or merge by hand" 3
+  fi
+fi
+
+# --------------------------------------------------------- local changes --
+if [ "$mode" = update ] || [ "$mode" = rebase ] || [ "$mode" = rollback ]; then
+  stage
+  dirty="$(git status --porcelain=v1 --untracked-files=no | cut -c4- | sed 's/.* -> //')"
+  if [ -n "$dirty" ]; then
+    say "Local changes (kept):"
+    printf '  %s\n' $dirty
+    if [ "$mode" = update ] || [ "$mode" = rebase ]; then
+      incoming_files="$(git diff --name-only HEAD "$upstream")"
+    else
+      incoming_files="$(git diff --name-only HEAD "$target")"
+    fi
+    clash="$(comm -12 <(printf '%s\n' $dirty | sort -u) <(printf '%s\n' $incoming_files | sort -u))"
+    if [ -n "$clash" ]; then
+      say "These files have local changes and are also changed by the new commits:"
+      printf '  %s\n' $clash
+      die "commit, stash or revert those changes first; nothing was changed" 3
+    fi
+  else
+    say "No local changes"
+  fi
+fi
+
+# ------------------------------------------------------------ move HEAD --
+if [ "$mode" = update ]; then
+  stage
+  if [ "$(git rev-list --count "HEAD..$upstream")" -eq 0 ]; then
+    say "Already at $(git rev-parse --short HEAD)"
+  else
+    # --autostash carries the local changes checked above across the move.
+    git merge --ff-only --autostash "$upstream" 2>&1 || die "fast-forward failed; nothing was changed" 3
+    git --no-pager log --format='  %h %s' "$before..HEAD"
+  fi
+elif [ "$mode" = rebase ]; then
+  stage
+  if [ "$ahead" -eq 0 ]; then
+    git merge --ff-only --autostash "$upstream" 2>&1 || die "fast-forward failed; nothing was changed" 3
+    say "No local commits to replay; fast-forwarded instead"
+  else
+    say "Replaying $ahead local commit(s) on top of $upstream"
+    git --no-pager log --format='  mine: %h %s' "$upstream..HEAD"
+    # A conflict leaves the checkout exactly as it was, rather than in the
+    # middle of a rebase the launcher cannot finish.
+    if ! git rebase --autostash "$upstream" 2>&1; then
+      say "Your commits and the new ones change the same lines:"
+      git --no-pager diff --name-only --diff-filter=U 2>/dev/null | sed 's/^/  /'
+      git rebase --abort 2>/dev/null
+      die "rebase stopped and was undone; resolve it by hand (git rebase $upstream)" 3
+    fi
+  fi
+  git --no-pager log --format='  %h %s' "$before..HEAD" | head -40
+elif [ "$mode" = rollback ]; then
+  stage
+  git cat-file -e "$target^{commit}" 2>/dev/null || die "unknown commit: $target" 2
+  git reset --keep "$target" 2>&1 || die "could not move back to $target; nothing was changed" 3
+  say "Now at $(git log -1 --format='%h %s')"
+fi
+
+undo_move() {
+  if [ "$mode" = rebase ]; then
+    # A rebase rewrites commits; moving back means the reflog entry, not a
+    # reset to a commit that no longer describes the work.
+    if [ "$(git rev-parse HEAD)" != "$before" ]; then
+      say "Restoring the source to $(git rev-parse --short "$before")"
+      git reset --hard "$before" 2>&1 || say "warning: could not move back; run: git -C '$dir' reset --hard $before"
+    fi
+    return
+  fi
+  if [ "$(git rev-parse HEAD)" != "$before" ]; then
+    say "Restoring the source to $(git rev-parse --short "$before") so it matches the servers that still run"
+    git reset --keep "$before" 2>&1 || say "warning: could not move back automatically; run: git -C '$dir' reset --keep $before"
+  fi
+}
+
+# ------------------------------------------------------------------ zig --
+stage
+zig_version="$(sed -n 's/^ZIG_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' envrc 2>/dev/null | head -1)"
+[ -n "$zig_version" ] || { undo_move; die "envrc does not name a ZIG_VERSION" 4; }
+zig_dist="zig-x86_64-linux-$zig_version"
+zig="$dir/.direnv/$zig_dist/zig"
+if [ ! -x "$zig" ]; then
+  mkdir -p .direnv
+  # Release builds live under download/<version>/, dev builds under builds/.
+  case "$zig_version" in
+    *-dev*) url="https://ziglang.org/builds/$zig_dist.tar.xz" ;;
+    *)      url="https://ziglang.org/download/$zig_version/$zig_dist.tar.xz" ;;
+  esac
+  say "Downloading Zig $zig_version (the version envrc asks for)"
+  if ! curl -fL --retry 3 --connect-timeout 30 "$url" | tar xJ -C .direnv; then
+    undo_move
+    die "could not download Zig $zig_version from $url" 4
+  fi
+fi
+say "Zig $("$zig" version)"
+
+# ---------------------------------------------------------------- build --
+stage
+say "zig build -Doptimize=$optimize"
+if ! "$zig" build -Doptimize="$optimize" 2>&1; then
+  undo_move
+  if { [ "$mode" = update ] || [ "$mode" = rebase ] || [ "$mode" = rollback ]; } && [ "$(git rev-parse HEAD)" = "$before" ]; then
+    say "Rebuilding the previous version so the binaries match the source again"
+    "$zig" build -Doptimize="$optimize" >/dev/null 2>&1 || say "warning: the previous version did not build either"
+  fi
+  [ "$mode" = install_build ] && die "the fresh clone did not build; it is kept in $dir to look at" 4
+  die "build failed; the servers were not restarted" 4
+fi
+
+# --------------------------------------------------------------- verify --
+stage
+for bin in remielle-dpsv remielle-sdksv remielle-gamesv; do
+  [ -x "zig-out/bin/$bin" ] || die "zig-out/bin/$bin is missing after the build" 4
+done
+head="$(git rev-parse HEAD)"
+if [ -n "$record" ]; then
+  mkdir -p "$(dirname "$record")"
+  printf '{"commit":"%s","built_at":%s,"optimize":"%s","previous":"%s"}\n' \
+    "$head" "$(date +%s)" "$optimize" "$before" > "$record.tmp" && mv "$record.tmp" "$record"
+fi
+say "Built $(git log -1 --format='%h %s')"
+say "done"

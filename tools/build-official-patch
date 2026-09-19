@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Builds the official client patch (remielle.exe + thaumiel.dll) from the
+# upstream thaumiel source and installs it into the game folder.
+#
+#   build-official-patch <work-dir> <client-dir> [branch] [repository]
+#
+# The branch defaults to master and the repository to upstream
+# (https://git.xeondev.com/remielle/thaumiel.git).  The Zig version the
+# source pins in its envrc is downloaded beside the work folder.
+#
+# Installing puts the official patch in charge: remielle.exe/thaumiel.dll
+# already in the client are kept as *.remielle-bak, and the Custom patch
+# (Pryce.exe/Armorer.dll) is moved aside the same way, so the client has one
+# patch and the launcher starts that one.  Nothing is deleted.
+#
+# Prints "[N/M] title" per stage for the launcher's progress bar.  Exit
+# status: 0 done, 2 bad arguments, 4 build failed, 5 other.
+
+set -uo pipefail
+# Dates and versions in the Gregorian calendar, whatever the desktop locale.
+export LC_ALL=C
+
+work="${1:-}"
+client="${2:-}"
+branch="${3:-master}"
+repo="${4:-https://git.xeondev.com/remielle/thaumiel.git}"
+
+say() { printf '%s\n' "$*"; }
+die() { say "error: $1"; exit "${2:-5}"; }
+
+[ -n "$work" ] && [ -n "$client" ] || die "usage: build-official-patch <work-dir> <client-dir> [branch] [repository]" 2
+[ -d "$client" ] || die "the client folder does not exist: $client" 2
+command -v git >/dev/null || die "git is needed to fetch the official patch's source (on Windows: Git for Windows)." 2
+command -v curl >/dev/null || die "curl is needed to download Zig." 2
+
+say "[plan] Fetch thaumiel|Zig|Build|Check client|Install"
+say "[1/5] Fetching thaumiel ($branch)"
+if [ -d "$work/.git" ]; then
+  git -C "$work" fetch --depth 1 origin "$branch" || die "could not fetch $repo ($branch)"
+  git -C "$work" reset --hard -q FETCH_HEAD || die "could not check out $branch"
+  git -C "$work" clean -fdxq
+else
+  rm -rf "$work"
+  mkdir -p "$(dirname "$work")"
+  git clone -q --depth 1 -b "$branch" "$repo" "$work" || die "could not clone $repo ($branch)"
+fi
+say "thaumiel $(git -C "$work" log -1 --format='%h %s')"
+
+say "[2/5] Preparing Zig"
+zig_version="$(sed -n 's/^ZIG_VERSION="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$work/envrc" 2>/dev/null | head -1)"
+[ -n "$zig_version" ] || die "thaumiel's envrc does not name a ZIG_VERSION"
+tools="$(dirname "$work")"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) zig_dist="zig-x86_64-windows-$zig_version"; ext=zip; zig_exe=zig.exe ;;
+  *) zig_dist="zig-x86_64-linux-$zig_version"; ext=tar.xz; zig_exe=zig ;;
+esac
+zig="$tools/$zig_dist/$zig_exe"
+if [ ! -x "$zig" ]; then
+  case "$zig_version" in
+    *-dev*) url="https://ziglang.org/builds/$zig_dist.$ext" ;;
+    *)      url="https://ziglang.org/download/$zig_version/$zig_dist.$ext" ;;
+  esac
+  say "downloading $url"
+  if [ "$ext" = zip ]; then
+    curl -fsSL --retry 3 --connect-timeout 30 -o "$tools/$zig_dist.zip" "$url" || die "could not download Zig $zig_version"
+    if command -v unzip >/dev/null; then
+      unzip -q -o "$tools/$zig_dist.zip" -d "$tools" || die "could not unpack Zig"
+    else
+      powershell -NoProfile -Command "Expand-Archive -LiteralPath '$tools/$zig_dist.zip' -DestinationPath '$tools' -Force" || die "could not unpack Zig"
+    fi
+    rm -f "$tools/$zig_dist.zip"
+  else
+    curl -fsSL --retry 3 --connect-timeout 30 "$url" | tar xJ -C "$tools" || die "could not download Zig $zig_version"
+  fi
+fi
+[ -x "$zig" ] || die "Zig $zig_version is not usable at $zig"
+say "Zig $("$zig" version)"
+
+say "[3/5] Building remielle.exe and thaumiel.dll"
+(cd "$work" && "$zig" build -Doptimize=ReleaseSmall 2>&1) || die "the official patch did not build" 4
+for f in remielle.exe thaumiel.dll; do
+  [ -f "$work/zig-out/bin/$f" ] || die "zig-out/bin/$f is missing after the build" 4
+done
+
+say "[4/5] Checking the client version"
+supported="$(sed -n 's/.*[Ss]upported client version: *`\{0,1\}\([A-Za-z0-9._]*\)`\{0,1\}.*/\1/p' "$work/README.md" | head -1)"
+have="$(tr -d '\r\n\t ' < "$client/version_info" 2>/dev/null || true)"
+if [ -n "$supported" ] && [ -n "$have" ] && [ "$supported" != "$have" ]; then
+  say "warning: this official patch is made for $supported, and the client is $have. It will not start that client until upstream catches up."
+else
+  say "client ${have:-(unknown)}, patch made for ${supported:-(not stated)}"
+fi
+
+# Keeps what is there as NAME.remielle-bak, or a dated name when a different
+# backup already holds that one.
+set_aside() {
+  local path="$1" bak="$1.remielle-bak"
+  [ -e "$path" ] || return 0
+  if [ -e "$bak" ] && ! cmp -s "$path" "$bak"; then
+    bak="$1.remielle-bak.$(date +%Y%m%d-%H%M%S)"
+  fi
+  mv -f "$path" "$bak" || die "could not move $path aside"
+  say "kept $(basename "$path") as $(basename "$bak")"
+}
+
+say "[5/5] Installing into the client"
+for f in remielle.exe thaumiel.dll Pryce.exe Armorer.dll; do
+  set_aside "$client/$f"
+done
+cp "$work/zig-out/bin/remielle.exe" "$client/remielle.exe" || die "could not copy remielle.exe"
+cp "$work/zig-out/bin/thaumiel.dll" "$client/thaumiel.dll" || die "could not copy thaumiel.dll"
+say "installed the official patch (remielle.exe + thaumiel.dll)"
