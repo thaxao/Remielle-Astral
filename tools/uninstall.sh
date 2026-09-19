@@ -84,7 +84,13 @@ if [ -f "$APP_ICON" ]; then
   ok "Removed: $APP_ICON"
 fi
 
-# Refresh desktop application database
+# Remove WebKit data directory
+rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/io.github.thaxao.RemielleAstral" 2>/dev/null || true
+
+# Refresh desktop application database for KDE and GNOME
+if command -v kbuildsycoca6 >/dev/null 2>&1; then
+  kbuildsycoca6 >/dev/null 2>&1 || true
+fi
 if command -v update-desktop-database >/dev/null 2>&1; then
   update-desktop-database "${XDG_DATA_HOME:-$HOME/.local/share}/applications" >/dev/null 2>&1 || true
 fi
