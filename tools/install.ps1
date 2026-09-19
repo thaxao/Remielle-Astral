@@ -315,45 +315,89 @@ function Show-Checks {
 
 # ---------------------------------------------------------------- shortcuts --
 function Set-Shortcut([string]$Path, [string]$Target) {
-    $wsh = New-Object -ComObject WScript.Shell
-    if (Test-Path -LiteralPath $Path) {
-        $old = $wsh.CreateShortcut($Path).TargetPath
-        if ($old -and -not $old.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $old)) {
-            Note (T "Left {0}: it starts a Remielle Astral elsewhere ({1})" "\u0e44\u0e21\u0e48\u0e41\u0e15\u0e30 {0} \u0e40\u0e1e\u0e23\u0e32\u0e30\u0e40\u0e1b\u0e34\u0e14 Remielle Astral \u0e17\u0e35\u0e48\u0e2d\u0e37\u0e48\u0e19 ({1})" $Path $old)
-            return
+    try {
+        $parent = Split-Path -Parent $Path
+        if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+            New-Item -ItemType Directory -LiteralPath $parent -Force -ErrorAction SilentlyContinue | Out-Null
         }
+        $wsh = New-Object -ComObject WScript.Shell
+        if (Test-Path -LiteralPath $Path) {
+            try {
+                $old = $wsh.CreateShortcut($Path).TargetPath
+                if ($old -and -not $old.StartsWith($Dir, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $old)) {
+                    Note (T "Left {0}: it starts a Remielle Astral elsewhere ({1})" "\u0e44\u0e21\u0e48\u0e41\u0e15\u0e30 {0} \u0e40\u0e1e\u0e23\u0e32\u0e30\u0e40\u0e1b\u0e34\u0e14 Remielle Astral \u0e17\u0e35\u0e48\u0e2d\u0e37\u0e48\u0e19 ({1})" $Path $old)
+                    return
+                }
+            } catch { }
+        }
+
+        # WScript.Shell fails to save directly to paths containing non-ASCII / Unicode characters
+        # (e.g. OneDrive 'เดสก์ท็อป'). Create the shortcut in %TEMP% first, then move it via Move-Item.
+        $tempLnk = Join-Path ([System.IO.Path]::GetTempPath()) ("remielle_" + [System.Guid]::NewGuid().ToString("N") + ".lnk")
+        try {
+            $s = $wsh.CreateShortcut($tempLnk)
+            $s.TargetPath = $Target
+            $s.WorkingDirectory = $Dir
+            $s.IconLocation = "$Target,0"
+            $s.Description = "Remielle Astral - Zenless Zone Zero server launcher"
+            $s.Save()
+
+            if (Test-Path -LiteralPath $tempLnk) {
+                if (Test-Path -LiteralPath $Path) {
+                    Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+                }
+                Move-Item -LiteralPath $tempLnk -Destination $Path -Force -ErrorAction Stop
+                return
+            }
+        } catch {
+            if (Test-Path -LiteralPath $tempLnk) {
+                Remove-Item -LiteralPath $tempLnk -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Fallback to direct save if temp approach didn't return
+        $s = $wsh.CreateShortcut($Path)
+        $s.TargetPath = $Target
+        $s.WorkingDirectory = $Dir
+        $s.IconLocation = "$Target,0"
+        $s.Description = "Remielle Astral - Zenless Zone Zero server launcher"
+        $s.Save()
+    } catch {
+        Warn (T "Could not create shortcut at '{0}': {1}" "\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e2a\u0e23\u0e49\u0e32\u0e07\u0e17\u0e32\u0e07\u0e25\u0e31\u0e14 '{0}': {1}" $Path $_.Exception.Message)
     }
-    $s = $wsh.CreateShortcut($Path)
-    $s.TargetPath = $Target
-    $s.WorkingDirectory = $Dir
-    $s.IconLocation = "$Target,0"
-    $s.Description = "Remielle Astral - Zenless Zone Zero server launcher"
-    $s.Save()
 }
 
 function Set-Integration([string]$V) {
     $exe = Get-ExeIn $Dir
     $desktop = [Environment]::GetFolderPath("Desktop")
     if ($desktop) { Set-Shortcut (Join-Path $desktop "Remielle Astral.lnk") $exe }
+    $userDesktop = Join-Path $env:USERPROFILE "Desktop"
+    if ($userDesktop -and (Test-Path -LiteralPath $userDesktop) -and ($userDesktop -ne $desktop)) {
+        Set-Shortcut (Join-Path $userDesktop "Remielle Astral.lnk") $exe
+    }
     $programs = [Environment]::GetFolderPath("Programs")
     if ($programs) { Set-Shortcut (Join-Path $programs "Remielle Astral.lnk") $exe }
     Ok (T "Desktop and Start menu shortcuts" "\u0e17\u0e32\u0e07\u0e25\u0e31\u0e14\u0e1a\u0e19 Desktop \u0e41\u0e25\u0e30 Start menu")
 
     # Settings > Apps lists it, and its Uninstall button runs uninstall.ps1.
-    $uninstall = Join-Path $Dir "tools\uninstall.ps1"
-    $size = [int]((Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notlike "*\.remielle-cache\*" } | Measure-Object Length -Sum).Sum / 1KB)
-    New-Item -Path $AppKey -Force | Out-Null
-    $values = @{
-        DisplayName = "Remielle Astral"; DisplayVersion = $V; Publisher = "thaxao"
-        DisplayIcon = $exe; InstallLocation = $Dir; URLInfoAbout = "https://github.com/$Repo"
-        UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstall`""
-        QuietUninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstall`" -Yes"
+    try {
+        $uninstall = Join-Path $Dir "tools\uninstall.ps1"
+        $size = [int]((Get-ChildItem -LiteralPath $Dir -Recurse -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notlike "*\.remielle-cache\*" } | Measure-Object Length -Sum).Sum / 1KB)
+        New-Item -Path $AppKey -Force | Out-Null
+        $values = @{
+            DisplayName = "Remielle Astral"; DisplayVersion = $V; Publisher = "thaxao"
+            DisplayIcon = $exe; InstallLocation = $Dir; URLInfoAbout = "https://github.com/$Repo"
+            UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstall`""
+            QuietUninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$uninstall`" -Yes"
+        }
+        foreach ($k in $values.Keys) { Set-ItemProperty -Path $AppKey -Name $k -Value $values[$k] }
+        Set-ItemProperty -Path $AppKey -Name NoModify -Value 1 -Type DWord
+        Set-ItemProperty -Path $AppKey -Name NoRepair -Value 1 -Type DWord
+        Set-ItemProperty -Path $AppKey -Name EstimatedSize -Value $size -Type DWord
+        Ok (T "Listed in Settings > Apps (Uninstall works from there)" "\u0e2d\u0e22\u0e39\u0e48\u0e43\u0e19 Settings > Apps (\u0e16\u0e2d\u0e19\u0e01\u0e32\u0e23\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07\u0e08\u0e32\u0e01\u0e15\u0e23\u0e07\u0e19\u0e31\u0e49\u0e19\u0e44\u0e14\u0e49)")
+    } catch {
+        Warn (T "Could not register in Settings > Apps: {0}" "\u0e44\u0e21\u0e48\u0e2a\u0e32\u0e21\u0e32\u0e23\u0e16\u0e25\u0e07\u0e17\u0e30\u0e40\u0e1a\u0e35\u0e22\u0e19\u0e43\u0e19 Settings > Apps: {0}" $_.Exception.Message)
     }
-    foreach ($k in $values.Keys) { Set-ItemProperty -Path $AppKey -Name $k -Value $values[$k] }
-    Set-ItemProperty -Path $AppKey -Name NoModify -Value 1 -Type DWord
-    Set-ItemProperty -Path $AppKey -Name NoRepair -Value 1 -Type DWord
-    Set-ItemProperty -Path $AppKey -Name EstimatedSize -Value $size -Type DWord
-    Ok (T "Listed in Settings > Apps (Uninstall works from there)" "\u0e2d\u0e22\u0e39\u0e48\u0e43\u0e19 Settings > Apps (\u0e16\u0e2d\u0e19\u0e01\u0e32\u0e23\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07\u0e08\u0e32\u0e01\u0e15\u0e23\u0e07\u0e19\u0e31\u0e49\u0e19\u0e44\u0e14\u0e49)")
 }
 
 # ------------------------------------------------------------------- modes --

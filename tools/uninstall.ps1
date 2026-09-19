@@ -146,10 +146,11 @@ function Invoke-Main {
     }
 
     $desktop = [Environment]::GetFolderPath("Desktop")
+    $userDesktop = Join-Path $env:USERPROFILE "Desktop"
     $programs = [Environment]::GetFolderPath("Programs")
     $links = @()
-    foreach ($folder in @($desktop, $programs)) {
-        if ($folder) { $links += (Join-Path $folder "Remielle Astral.lnk") }
+    foreach ($folder in @($desktop, $userDesktop, $programs)) {
+        if ($folder -and (Test-Path -LiteralPath $folder)) { $links += (Join-Path $folder "Remielle Astral.lnk") }
     }
     $hasProgram = (Test-Path -LiteralPath (Join-Path $Dir "remielle-astral.exe")) -or (Test-Path -LiteralPath (Join-Path $Dir "Remielle Astral.exe")) -or
         (Test-Path -LiteralPath (Join-Path $Dir "MANIFEST")) -or (Test-Path -LiteralPath (Join-Path $Dir ".install-info"))
