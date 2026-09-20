@@ -16,7 +16,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
-zig="${ZIG:-$([ -x "$HOME/.zvm/0.14.0/zig" ] && echo "$HOME/.zvm/0.14.0/zig" || command -v zig)}"
+zig="${ZIG:-$([ -x "$HOME/.zvm/0.16.0/zig" ] && echo "$HOME/.zvm/0.16.0/zig" || command -v zig)}"
 tag=""
 publish=0
 for arg in "$@"; do
@@ -116,8 +116,10 @@ if [ "$publish" = 1 ]; then
   command -v gh >/dev/null || { echo "gh is not installed; upload the files in $out by hand" >&2; exit 1; }
   [ -n "$repo" ] || { echo "cannot read update.launcher_repo from src/settings.zig" >&2; exit 1; }
   say "Publishing $tag to $repo"
-  notes="Remielle Astral $version"
-  gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" \
+  notes="Remielle Astral $version for the CNBetaWin3.3.2 client (alpha / demo build, built with Zig 0.16.0)."
+  extra_args=()
+  if [ -n "$stage" ]; then extra_args+=(--prerelease); fi
+  gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" "${extra_args[@]}" \
     "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
 else
   say "To publish:"
