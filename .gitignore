@@ -1,0 +1,13 @@
+# Build output
+zig-out/
+.zig-cache/
+
+# This machine's settings and caches (paths, downloaded store data, backups)
+settings.json
+.remielle-cache/
+
+*.astral-tmp
+
+# Private donation assets (developer financial info not committed to public git)
+src/static/donate.json
+src/static/donate_qr.*

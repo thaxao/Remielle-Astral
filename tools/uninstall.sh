@@ -39,6 +39,7 @@ LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/remielle-astral-op.lock"
 LEGACY_FILES="remielle-astral remielle-astral.old README.md LICENSE icon.png MANIFEST
 tools/remielle-update tools/build-official-patch tools/import-patch
 tools/install.sh tools/install.ps1 tools/install.cmd
+tools/update.sh tools/update.ps1 tools/update.cmd
 tools/uninstall.sh tools/uninstall.ps1 tools/uninstall.cmd
 patch/Pryce.exe patch/Armorer.dll"
 # The mod library's parts when it lives in the install folder (the default).
@@ -185,7 +186,9 @@ main() {
     say "$(T "Remielle Astral is not installed in $DIR." "ไม่พบ Remielle Astral ใน $DIR")"
     return 0
   fi
-  if [ -d "$DIR" ] && [ ! -e "$DIR/remielle-astral" ] && [ ! -f "$DIR/settings.json" ] && [ ! -f "$DIR/.install-info" ] && [ ! -f "$DIR/MANIFEST" ] && [ ! -d "$DIR/xxmi" ]; then
+  # After a plain uninstall only settings, caches and mods survive here;
+  # .remielle-cache alone still marks this as Remielle Astral's folder.
+  if [ -d "$DIR" ] && [ ! -e "$DIR/remielle-astral" ] && [ ! -f "$DIR/settings.json" ] && [ ! -f "$DIR/.install-info" ] && [ ! -f "$DIR/MANIFEST" ] && [ ! -d "$DIR/xxmi" ] && [ ! -d "$DIR/.remielle-cache" ]; then
     die "$(T "$DIR does not look like a Remielle Astral folder; nothing was removed." "$DIR ไม่ใช่โฟลเดอร์ของ Remielle Astral จึงไม่ลบอะไร")"
   fi
 

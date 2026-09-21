@@ -45,6 +45,7 @@ LOCK_FILE="${XDG_RUNTIME_DIR:-/tmp}/remielle-astral-op.lock"
 LEGACY_FILES="remielle-astral remielle-astral.old README.md LICENSE icon.png MANIFEST
 tools/remielle-update tools/build-official-patch tools/import-patch
 tools/install.sh tools/install.ps1 tools/install.cmd
+tools/update.sh tools/update.ps1 tools/update.cmd
 tools/uninstall.sh tools/uninstall.ps1 tools/uninstall.cmd
 patch/Pryce.exe patch/Armorer.dll"
 
@@ -390,8 +391,10 @@ offer_launch() {
   [ "$launch" = 1 ] || return 0
   [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || return 0
   ask "$(T "Start Remielle Astral now?" "เปิด Remielle Astral เลยไหม?")" y || return 0
-  (cd "$DIR" && setsid -f "$DIR/remielle-astral" >/dev/null 2>&1 </dev/null) ||
-    (cd "$DIR" && nohup "$DIR/remielle-astral" >/dev/null 2>&1 </dev/null &)
+  # 9>&-: the child must not inherit the operation lock, or every later
+  # install/uninstall reports "another install is running" while it lives.
+  (cd "$DIR" && setsid -f "$DIR/remielle-astral" >/dev/null 2>&1 </dev/null 9>&-) ||
+    (cd "$DIR" && nohup "$DIR/remielle-astral" >/dev/null 2>&1 </dev/null 9>&- &)
 }
 
 # ------------------------------------------------------------------- modes --
@@ -430,6 +433,10 @@ do_install() {
   if [ -n "$zip_file" ]; then
     [ -f "$zip_file" ] || die "$zip_file does not exist"
     ZIP_NAME="$(basename "$zip_file")"
+    case "$ZIP_NAME" in
+      remielle-astral-*-"$PLATFORM".zip) ;;
+      *) die "$(T "$ZIP_NAME is not a Remielle Astral zip for $PLATFORM." "$ZIP_NAME ไม่ใช่ zip ของ Remielle Astral สำหรับ $PLATFORM")" ;;
+    esac
     TAG=""
     URL="file://$(cd "$(dirname "$zip_file")" && pwd)/$ZIP_NAME"
     NEW_VERSION="${ZIP_NAME#remielle-astral-}"
@@ -459,7 +466,7 @@ do_install() {
         ok "$(T "Already up to date; nothing changed." "เป็นรุ่นล่าสุดอยู่แล้ว ไม่ได้เปลี่ยนอะไร")"
         return 0
       fi
-    elif ver_gt "$have" "$NEW_VERSION"; then
+    elif ver_gt "$have" "$NEW_VERSION" && [ "$force" = 0 ]; then
       ask "$(T "$NEW_VERSION is older than the installed $have. Install it anyway?" "$NEW_VERSION เก่ากว่า $have ที่ติดตั้งอยู่ ติดตั้งต่อไหม?")" n || return 0
     fi
   fi

@@ -49,6 +49,7 @@ $LegacyFiles = @(
     "remielle-astral.exe", "Remielle Astral.exe", "remielle-astral.exe.old", "README.md", "LICENSE", "icon.png", "MANIFEST",
     "tools/remielle-update", "tools/build-official-patch", "tools/import-patch",
     "tools/install.sh", "tools/install.ps1", "tools/install.cmd",
+    "tools/update.sh", "tools/update.ps1", "tools/update.cmd",
     "tools/uninstall.sh", "tools/uninstall.ps1", "tools/uninstall.cmd",
     "patch/Pryce.exe", "patch/Armorer.dll"
 )

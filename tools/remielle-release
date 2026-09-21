@@ -35,7 +35,7 @@ stage="$(zig_const stage)"
 [ -n "$launcher_version" ] && [ -n "$game_version" ] || { echo "cannot read launcher_version/game_version from src/main.zig" >&2; exit 1; }
 version="$launcher_version.b$game_version${stage:+-$stage}"
 zon_version="$(sed -n 's/^ *\.version *= *"\([^"]*\)".*/\1/p' build.zig.zon | head -1)"
-if [ "$zon_version" != "$launcher_version-b$game_version${stage:+-$stage}" ]; then
+if [ "$zon_version" != "$launcher_version-b$game_version${stage:+-$stage}" ] && [ "$zon_version" != "${launcher_version}.0-b$game_version${stage:+-$stage}" ]; then
   echo "warning: build.zig.zon says $zon_version; set it to $launcher_version-b$game_version${stage:+-$stage} (zon wants semver)" >&2
 fi
 [ -n "$tag" ] || tag="v$version"
@@ -68,7 +68,7 @@ stage() { # stage <platform>
   local plat="$1" dir="$out/stage-$1/remielle-astral-$name-$1"
   rm -rf "$out/stage-$1"
   mkdir -p "$dir/tools" "$dir/patch"
-  for t in remielle-update build-official-patch install.sh install.ps1 install.cmd uninstall.sh uninstall.ps1 uninstall.cmd; do
+  for t in remielle-update build-official-patch install.sh install.ps1 install.cmd update.sh update.ps1 update.cmd uninstall.sh uninstall.ps1 uninstall.cmd; do
     if [ -f "tools/$t" ]; then
       install -m 755 "tools/$t" "$dir/tools/"
     fi
@@ -115,12 +115,17 @@ say "[4/4] $out"
 if [ "$publish" = 1 ]; then
   command -v gh >/dev/null || { echo "gh is not installed; upload the files in $out by hand" >&2; exit 1; }
   [ -n "$repo" ] || { echo "cannot read update.launcher_repo from src/settings.zig" >&2; exit 1; }
-  say "Publishing $tag to $repo"
   notes="Remielle Astral $version for the CNBetaWin3.3.2 client (alpha / demo build, built with Zig 0.16.0)."
   extra_args=()
   if [ -n "$stage" ]; then extra_args+=(--prerelease); fi
-  gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" "${extra_args[@]}" \
-    "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+  if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+    say "Release $tag already exists, updating assets with --clobber..."
+    gh release upload "$tag" --repo "$repo" --clobber \
+      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+  else
+    gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" "${extra_args[@]}" \
+      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+  fi
 else
   say "To publish:"
   say "  gh release create $tag --repo ${repo:-<owner>/<repo>} --title \"Remielle Astral $version\" \\"

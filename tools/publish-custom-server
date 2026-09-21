@@ -5,10 +5,10 @@
 #   tools/publish-custom-server <server-checkout> [options]
 #
 #   --version V     version of this build (default: <build.zig.zon version>-custom.<YYYYMMDD>)
-#   --out DIR       where the zips go (default: .remielle-cache/release/server-v<version>)
+#   --out DIR       where the zips go (default: .remielle-cache/release/a<version>)
 #   --publish       upload with gh to the launcher's repository
 #   --repo O/N      GitHub repository for --publish (default: thaxao/Remielle-Astral)
-#   --tag T         release tag for --publish (default: server-v<version>); an
+#   --tag T         release tag for --publish (default: a<version>); an
 #                   existing release with that tag gets the files added
 #
 # Builds the checkout for Linux and Windows (ReleaseSafe) with the Zig version
@@ -75,8 +75,8 @@ zig="${ZIG_SERVER:-$src/.direnv/zig-x86_64-linux-$zig_version/zig}"
 zon_version="$(sed -n 's/^ *\.version *= *"\([^"]*\)".*/\1/p' "$src/build.zig.zon" | head -1)"
 [ -n "$version" ] || version="${zon_version:-0.0.0}-custom.$(date +%Y%m%d)"
 case "$version" in *[!A-Za-z0-9._-]*) die "version $version has characters a file name should not" ;; esac
-[ -n "$tag" ] || tag="server-v$version"
-[ -n "$out" ] || out="$here/.remielle-cache/release/server-v$version"
+[ -n "$tag" ] || tag="a$version"
+[ -n "$out" ] || out="$here/.remielle-cache/release/a$version"
 branch="$(git -C "$src" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 head="$(git -C "$src" rev-parse HEAD 2>/dev/null || echo "")"
 base="$(git -C "$src" merge-base HEAD "@{upstream}" 2>/dev/null || echo "$head")"
