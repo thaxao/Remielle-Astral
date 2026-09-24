@@ -1,6 +1,6 @@
 pkgbase = remielle-astral-bin
 	pkgdesc = Launcher for the Remielle (Zenless Zone Zero) private server: servers, account editor, mods
-	pkgver = 1.3.b3.3.3
+	pkgver = 1.3.1.b3.3.3
 	pkgrel = 1
 	url = https://github.com/thaxao/Remielle-Astral
 	install = remielle-astral-bin.install
@@ -20,7 +20,7 @@ pkgbase = remielle-astral-bin
 	conflicts = remielle-astral-git
 	options = !strip
 	options = !debug
-	source = remielle-astral-1.3.b3.3.3-linux-x86_64.zip::https://github.com/thaxao/Remielle-Astral/releases/download/v1.3.b3.3.3/remielle-astral-1.3.b3.3.3-linux-x86_64.zip
-	sha256sums = cbf735fd2e0a62dc2f5f4bb467fd099851fc1362bdeda3b7335ff798da066b30
+	source = remielle-astral-1.3.1.b3.3.3-linux-x86_64.zip::https://github.com/thaxao/Remielle-Astral/releases/download/v1.3.1.b3.3.3/remielle-astral-1.3.1.b3.3.3-linux-x86_64.zip
+	sha256sums = bdeed20f063180d8f4dbb76c02de06fe77a0df94bee0591f9535ec36eb7e16a9
 
 pkgname = remielle-astral-bin
