@@ -2,8 +2,8 @@
 # Remielle Astral installer for Linux.
 #
 #   curl -fsSL https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --version v1.1.2.b3.3.2-alpha
-#   bash install.sh --zip ~/Downloads/remielle-astral-1.1.2.b3.3.2-alpha-linux-x86_64.zip
+#   curl -fsSL .../install.sh | bash -s -- --version v1.3.1.b3.3.3
+#   bash install.sh --zip ~/Downloads/remielle-astral-1.3.1.b3.3.3-linux-x86_64.zip
 #
 # Options
 #   --version TAG   install that release instead of the newest ("v" optional)
@@ -112,19 +112,25 @@ ver_gt() {
   local an="${a%%-*}" bn="${b%%-*}" ap="" bp=""
   [ "$an" != "$a" ] && ap="${a#*-}"
   [ "$bn" != "$b" ] && bp="${b#*-}"
+  local al="$an" bl="$bn" ag="" bg="" segment left right i x y
+  if [[ "$an" == *'.b'* ]]; then al="${an%%.b*}"; ag="${an#*.b}"; fi
+  if [[ "$bn" == *'.b'* ]]; then bl="${bn%%.b*}"; bg="${bn#*.b}"; fi
   local -a va vb
-  IFS=. read -r -a va <<<"$an"
-  IFS=. read -r -a vb <<<"$bn"
-  local i x y
-  for i in 0 1 2 3 4 5 6 7; do
-    x="${va[i]:-0}"; y="${vb[i]:-0}"
-    x="${x#"${x%%[0-9]*}"}"; y="${y#"${y%%[0-9]*}"}"
-    case "$x" in ''|*[!0-9]*) x=0 ;; esac
-    case "$y" in ''|*[!0-9]*) y=0 ;; esac
-    if [ "$((10#$x))" -ne "$((10#$y))" ]; then
-      [ "$((10#$x))" -gt "$((10#$y))" ]
-      return
-    fi
+  for segment in "$al|$bl" "$ag|$bg"; do
+    left="${segment%%|*}"; right="${segment#*|}"
+    [ -n "$left" ] && [ -n "$right" ] || continue
+    IFS=. read -r -a va <<<"$left"
+    IFS=. read -r -a vb <<<"$right"
+    for i in 0 1 2 3 4 5 6 7; do
+      x="${va[i]:-0}"; y="${vb[i]:-0}"
+      x="${x#"${x%%[0-9]*}"}"; y="${y#"${y%%[0-9]*}"}"
+      case "$x" in ''|*[!0-9]*) x=0 ;; esac
+      case "$y" in ''|*[!0-9]*) y=0 ;; esac
+      if [ "$((10#$x))" -ne "$((10#$y))" ]; then
+        [ "$((10#$x))" -gt "$((10#$y))" ]
+        return
+      fi
+    done
   done
   [ -z "$ap" ] && [ -n "$bp" ] && return 0
   [ -n "$ap" ] && [ -z "$bp" ] && return 1
@@ -476,12 +482,14 @@ do_install() {
   if [ -n "$zip_file" ]; then
     cp "$zip_file" "$zip" || die "cannot read $zip_file"
     if [ -f "$(dirname "$zip_file")/SHA256SUMS" ]; then
-      verify_sum "$zip" "$(dirname "$zip_file")/SHA256SUMS" "$ZIP_NAME"
-      ok "SHA256 ✓"
+      cp "$(dirname "$zip_file")/SHA256SUMS" "$sums"
     else
-      SHA="$(sha256sum "$zip" | cut -d' ' -f1)"
-      warn "$(T "No SHA256SUMS beside the zip: it is installed unchecked." "ไม่มี SHA256SUMS ข้าง zip จึงติดตั้งโดยไม่ได้ตรวจ")"
+      note "$(T "SHA256SUMS is not beside the zip; fetching it from release v$NEW_VERSION." "ไม่พบ SHA256SUMS ข้างไฟล์ กำลังโหลดจาก release v$NEW_VERSION")"
+      download "https://github.com/$REPO/releases/download/v$NEW_VERSION/SHA256SUMS" "$sums" 2>/dev/null ||
+        die "$(T "The local zip cannot be verified. Put SHA256SUMS beside it, then try again." "ตรวจสอบ zip ไม่ได้ ให้วาง SHA256SUMS ไว้ข้างไฟล์แล้วลองใหม่")"
     fi
+    verify_sum "$zip" "$sums" "$ZIP_NAME"
+    ok "SHA256 ✓"
   else
     say "$(T "Downloading" "ดาวน์โหลด") $ZIP_NAME"
     download "$URL" "$zip" || die "$(T "Download failed:" "ดาวน์โหลดไม่สำเร็จ:") $URL"
@@ -549,8 +557,14 @@ main() {
   done
 
   if command -v flock >/dev/null; then
-    { exec 9>"$LOCK_FILE" && flock -n 9; } ||
-      die "$(T "Another install or uninstall of Remielle Astral is running." "มีการติดตั้งหรือถอนการติดตั้ง Remielle Astral ทำงานอยู่แล้ว")"
+    # Containers and restricted desktops can expose XDG_RUNTIME_DIR but mount
+    # it read-only.  That is not a competing installer, so fall back to a
+    # per-user lock in the real temporary directory before reporting busy.
+    if ! { exec 9>"$LOCK_FILE"; } 2>/dev/null; then
+      LOCK_FILE="${TMPDIR:-/tmp}/remielle-astral-op-${UID:-$(id -u)}.lock"
+      exec 9>"$LOCK_FILE" || die "$(T "Cannot create the installer lock file." "สร้างไฟล์ล็อกสำหรับติดตั้งไม่ได้")"
+    fi
+    flock -n 9 || die "$(T "Another install or uninstall of Remielle Astral is running." "มีการติดตั้งหรือถอนการติดตั้ง Remielle Astral ทำงานอยู่แล้ว")"
   fi
   TMP="$(mktemp -d "${TMPDIR:-/tmp}/remielle-astral-install.XXXXXX")" || die "cannot create a temporary folder"
   trap 'rm -rf "$TMP"' EXIT

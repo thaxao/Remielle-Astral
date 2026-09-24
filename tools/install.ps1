@@ -1,8 +1,8 @@
 # Remielle Astral installer for Windows (PowerShell 5.1 or 7).
 #
 #   irm https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/install.ps1 | iex
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/install.ps1))) -Version v1.1.2.b3.3.2-alpha
-#   powershell -ExecutionPolicy Bypass -File install.ps1 -Zip .\remielle-astral-1.1.2.b3.3.2-alpha-windows-x86_64.zip
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/install.ps1))) -Version v1.3.1.b3.3.3
+#   powershell -ExecutionPolicy Bypass -File install.ps1 -Zip .\remielle-astral-1.3.1.b3.3.3-windows-x86_64.zip
 #
 #   -Version TAG    install that release instead of the newest ("v" optional)
 #   -Zip FILE       install a zip already downloaded; a SHA256SUMS beside it is checked
@@ -87,12 +87,20 @@ function Test-Newer([string]$A, [string]$B) {
     $b = ($B.Trim() -replace '^[vV]', '').Split(' ')[0]
     $an, $ap = $a.Split('-', 2)
     $bn, $bp = $b.Split('-', 2)
-    $as = $an.Split('.'); $bs = $bn.Split('.')
-    for ($i = 0; $i -lt 8; $i++) {
-        $x = 0; $y = 0
-        if ($i -lt $as.Count) { [void][int]::TryParse(($as[$i] -replace '^[A-Za-z]+', ''), [ref]$x) }
-        if ($i -lt $bs.Count) { [void][int]::TryParse(($bs[$i] -replace '^[A-Za-z]+', ''), [ref]$y) }
-        if ($x -ne $y) { return $x -gt $y }
+    $al = $an; $bl = $bn; $ag = ''; $bg = ''
+    if ($an.Contains('.b')) { $al, $ag = $an -split '\.b', 2 }
+    if ($bn.Contains('.b')) { $bl, $bg = $bn -split '\.b', 2 }
+    for ($part = 0; $part -lt 2; $part++) {
+        $left = if ($part -eq 0) { $al } else { $ag }
+        $right = if ($part -eq 0) { $bl } else { $bg }
+        if (-not $left -or -not $right) { continue }
+        $as = $left.Split('.'); $bs = $right.Split('.')
+        for ($i = 0; $i -lt 8; $i++) {
+            $x = 0; $y = 0
+            if ($i -lt $as.Count) { [void][int]::TryParse(($as[$i] -replace '^[A-Za-z]+', ''), [ref]$x) }
+            if ($i -lt $bs.Count) { [void][int]::TryParse(($bs[$i] -replace '^[A-Za-z]+', ''), [ref]$y) }
+            if ($x -ne $y) { return $x -gt $y }
+        }
     }
     if (-not $ap -and $bp) { return $true }
     if ($ap -and -not $bp) { return $false }
@@ -479,11 +487,14 @@ function Invoke-Install([string]$Temp) {
     if ($Zip) {
         Copy-Item -LiteralPath $zipFull -Destination $zipPath -Force
         $sums = Join-Path (Split-Path $zipFull) "SHA256SUMS"
-        if (Test-Path -LiteralPath $sums) { Confirm-Sum $zipPath $sums $rel.Name; Ok "SHA256 OK" }
-        else {
-            $script:Sha = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLower()
-            Warn (T "No SHA256SUMS beside the zip: it is installed unchecked." "\u0e44\u0e21\u0e48\u0e21\u0e35 SHA256SUMS \u0e02\u0e49\u0e32\u0e07 zip \u0e08\u0e36\u0e07\u0e15\u0e34\u0e14\u0e15\u0e31\u0e49\u0e07\u0e42\u0e14\u0e22\u0e44\u0e21\u0e48\u0e44\u0e14\u0e49\u0e15\u0e23\u0e27\u0e08")
+        if (-not (Test-Path -LiteralPath $sums)) {
+            $sums = Join-Path $Temp "SHA256SUMS.local"
+            Note (T "SHA256SUMS is not beside the zip; fetching it from release v{0}." "\u0e44\u0e21\u0e48\u0e1e\u0e1a SHA256SUMS \u0e02\u0e49\u0e32\u0e07\u0e44\u0e1f\u0e25\u0e4c \u0e01\u0e33\u0e25\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e08\u0e32\u0e01 release v{0}" $rel.Version)
+            try { Get-File "https://github.com/$Repo/releases/download/v$($rel.Version)/SHA256SUMS" $sums }
+            catch { Fail (T "The local zip cannot be verified. Put SHA256SUMS beside it, then try again." "\u0e15\u0e23\u0e27\u0e08\u0e2a\u0e2d\u0e1a zip \u0e44\u0e21\u0e48\u0e44\u0e14\u0e49 \u0e43\u0e2b\u0e49\u0e27\u0e32\u0e07 SHA256SUMS \u0e44\u0e27\u0e49\u0e02\u0e49\u0e32\u0e07\u0e44\u0e1f\u0e25\u0e4c\u0e41\u0e25\u0e49\u0e27\u0e25\u0e2d\u0e07\u0e43\u0e2b\u0e21\u0e48") }
         }
+        Confirm-Sum $zipPath $sums $rel.Name
+        Ok "SHA256 OK"
     } else {
         Say ((T "Downloading" "\u0e14\u0e32\u0e27\u0e19\u0e4c\u0e42\u0e2b\u0e25\u0e14") + " " + $rel.Name)
         Get-File $rel.Url $zipPath
