@@ -7,8 +7,9 @@
 
 pkgname=remielle-astral-bin
 _pkgname=remielle-astral
-pkgver=1.1.6.b3.3.2alpha
-_ver=1.1.6.b3.3.2-alpha
+pkgver=1.3.b3.3.3
+_ver=1.3.b3.3.3
+_tag=v1.3.b3.3.3
 pkgrel=1
 pkgdesc="Launcher for the Remielle (Zenless Zone Zero) private server: servers, account editor, mods"
 arch=('x86_64')
@@ -21,8 +22,8 @@ provides=("$_pkgname")
 conflicts=("$_pkgname" "$_pkgname-git")
 options=('!strip' '!debug')
 install=remielle-astral-bin.install
-source=("$_pkgname-$_ver-linux-x86_64.zip::$url/releases/download/v$_ver/$_pkgname-$_ver-linux-x86_64.zip")
-sha256sums=('238c4b158b5005edfee4ed46189b0e70aab3254c85f881c7f5c8cb1b082dc875')
+source=("$_pkgname-$_ver-linux-x86_64.zip::$url/releases/download/$_tag/$_pkgname-$_ver-linux-x86_64.zip")
+sha256sums=('cbf735fd2e0a62dc2f5f4bb467fd099851fc1362bdeda3b7335ff798da066b30')
 
 package() {
   cd "$_pkgname-$_ver-linux-x86_64"

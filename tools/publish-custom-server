@@ -102,7 +102,7 @@ for platform in linux-x86_64 windows-x86_64; do
   say "[$platform] building"
   (cd "$src" && "$zig" build -Doptimize=ReleaseSafe -Dtarget="$target" --prefix "$prefix") || die "build for $platform failed"
 
-  mkdir -p "$stage/zig-out/bin" "$stage/assets/filecfg" "$stage/gamesv" "$stage/dpsv" "$stage/sdksv"
+  mkdir -p "$stage/zig-out/bin" "$stage/assets/filecfg" "$stage/gamesv" "$stage/dpsv" "$stage/sdksv" "$stage/rmpb/src" "$stage/rmctl/src" "$stage/LICENSES"
   for bin in remielle-gamesv remielle-dpsv remielle-sdksv rmctl; do
     [ -f "$prefix/bin/$bin$ext" ] || die "$bin$ext is missing after the $platform build (is rmctl installed by build.zig?)"
     cp "$prefix/bin/$bin$ext" "$stage/zig-out/bin/"
@@ -110,7 +110,10 @@ for platform in linux-x86_64 windows-x86_64; do
   grep -q "remielle-custom-edition features=" "$stage/zig-out/bin/remielle-gamesv$ext" || die "the $platform gamesv does not carry the custom_edition mark (is it logged in gamesv/src/main.zig?)"
   cp "$src"/assets/filecfg/*.zon "$stage/assets/filecfg/"
   for sv in gamesv dpsv sdksv; do cp "$src/$sv/config.zon" "$stage/$sv/"; done
+  cp "$src/rmpb/src/pb.stable.zig" "$stage/rmpb/src/"
+  cp "$src/rmctl/src/rand_properties.zig" "$stage/rmctl/src/"
   [ -f "$src/LICENSE" ] && cp "$src/LICENSE" "$stage/"
+  [ -f "$src/LICENSE" ] && cp "$src/LICENSE" "$stage/LICENSES/Remielle-AGPL-3.0.txt"
   cat > "$stage/edition.json" <<EOF
 {
   "edition": "custom",
@@ -128,18 +131,23 @@ done
 rm -rf "$work"
 
 (cd "$out" && sha256sum remielle-server-*.zip > SERVER-SHA256SUMS)
+preview="$here/packaging/server-preview.png"
+[ -s "$preview" ] || die "missing release preview: $preview"
+install -m 644 "$preview" "$out/Preview.png"
 say "wrote $out"
 cat "$out/SERVER-SHA256SUMS"
 
 if [ "$publish" = 1 ]; then
   command -v gh >/dev/null || die "gh is needed for --publish"
-  files=("$out"/remielle-server-*.zip "$out/SERVER-SHA256SUMS")
+  files=("$out"/remielle-server-*.zip "$out/SERVER-SHA256SUMS" "$out/Preview.png")
   if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
     gh release upload "$tag" "${files[@]}" --repo "$repo" --clobber
   else
     gh release create "$tag" "${files[@]}" --repo "$repo" \
       --title "Remielle Custom server $version" \
-      --notes "Custom Remielle server $version for Remielle Astral (features: $features). Install or update it from Updates -> Server edition."
+      --prerelease --notes "Custom Remielle server $version for Remielle Astral (features: $features). Install or update it from Updates -> Server edition.
+
+![Custom Server preview](https://github.com/$repo/releases/download/$tag/Preview.png)"
   fi
   say "published $tag to $repo"
 fi

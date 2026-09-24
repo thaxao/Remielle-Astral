@@ -53,9 +53,12 @@ fi
 out="$root/.remielle-cache/release/$tag"
 rm -rf "$out"
 mkdir -p "$out"
+preview="$root/packaging/launcher-preview.png"
+[ -s "$preview" ] || { echo "missing release preview: $preview" >&2; exit 1; }
+install -m 644 "$preview" "$out/Preview.png"
 
 say "[1/4] Building (ReleaseFast)"
-"$zig" build -Doptimize=ReleaseFast
+"$zig" build --global-cache-dir "$root/.zig-global-cache" -Doptimize=ReleaseFast
 
 linux_exe="zig-out/bin/remielle-astral"
 win_exe="zig-out/bin/remielle-astral.exe"
@@ -67,8 +70,10 @@ built="$("$linux_exe" --version 2>/dev/null || true)"
 stage() { # stage <platform>
   local plat="$1" dir="$out/stage-$1/remielle-astral-$name-$1"
   rm -rf "$out/stage-$1"
-  mkdir -p "$dir/tools" "$dir/patch"
-  for t in remielle-update build-official-patch install.sh install.ps1 install.cmd update.sh update.ps1 update.cmd uninstall.sh uninstall.ps1 uninstall.cmd; do
+  mkdir -p "$dir/tools" "$dir/patch" "$dir/LICENSES"
+  # Runtime helpers are used by the launcher on both systems (Git for
+  # Windows supplies bash).  Installer wrappers stay platform-specific.
+  for t in remielle-update build-official-patch; do
     if [ -f "tools/$t" ]; then
       install -m 755 "tools/$t" "$dir/tools/"
     fi
@@ -76,20 +81,33 @@ stage() { # stage <platform>
   if [ -f "src/patch/Pryce.exe" ]; then install -m 755 "src/patch/Pryce.exe" "$dir/patch/"; fi
   if [ -f "src/patch/Armorer.dll" ]; then install -m 644 "src/patch/Armorer.dll" "$dir/patch/"; fi
   install -m 644 README.md LICENSE "$dir/"
+  cp -a LICENSES/. "$dir/LICENSES/"
   if [ -f "src/static/icon.png" ]; then install -m 644 "src/static/icon.png" "$dir/icon.png"; fi
   case "$plat" in
     linux-x86_64)
+      for t in install.sh update.sh uninstall.sh; do install -m 755 "tools/$t" "$dir/tools/"; done
       install -m 755 "$linux_exe" "$dir/remielle-astral"
-      if [ -f "tools/hpack" ]; then install -m 755 "tools/hpack" "$dir/tools/hpack"; fi
+      [ -x "tools/hpack" ] || { echo "missing executable tools/hpack" >&2; exit 1; }
+      install -m 755 "tools/hpack" "$dir/tools/hpack"
       ;;
     windows-x86_64)
+      for t in install.ps1 install.cmd update.ps1 update.cmd uninstall.ps1 uninstall.cmd; do install -m 644 "tools/$t" "$dir/tools/"; done
       install -m 755 "$win_exe" "$dir/remielle-astral.exe"
-      if [ -f "tools/hpack.exe" ]; then install -m 755 "tools/hpack.exe" "$dir/tools/hpack.exe"; fi
+      [ -f "tools/hpack.exe" ] || { echo "missing tools/hpack.exe" >&2; exit 1; }
+      install -m 755 "tools/hpack.exe" "$dir/tools/hpack.exe"
       ;;
   esac
   # The program's own files, so the uninstallers remove exactly these and
   # leave settings, saves and mods alone.  The in-app updater copies it too.
   ( cd "$dir" && { find . -type f | sed 's|^\./||'; echo MANIFEST; } | LC_ALL=C sort -u > MANIFEST )
+  case "$plat" in
+    linux-x86_64)
+      [ ! -e "$dir/tools/install.ps1" ] && [ ! -e "$dir/tools/install.cmd" ] || { echo "Windows installer leaked into Linux package" >&2; exit 1; }
+      ;;
+    windows-x86_64)
+      [ ! -e "$dir/tools/install.sh" ] && [ ! -e "$dir/tools/update.sh" ] || { echo "Linux installer leaked into Windows package" >&2; exit 1; }
+      ;;
+  esac
   printf '%s' "$dir"
 }
 
@@ -109,27 +127,27 @@ for plat in linux-x86_64 windows-x86_64; do
   say "  $zipname  $(du -h "$zipname" | cut -f1)"
 done
 rm -rf stage-linux-x86_64 stage-windows-x86_64
-say "  SHA256SUMS"
+say "  SHA256SUMS and Preview.png"
 
 say "[4/4] $out"
 if [ "$publish" = 1 ]; then
   command -v gh >/dev/null || { echo "gh is not installed; upload the files in $out by hand" >&2; exit 1; }
   [ -n "$repo" ] || { echo "cannot read update.launcher_repo from src/settings.zig" >&2; exit 1; }
-  notes="Remielle Astral $version for the CNBetaWin3.3.2 client (alpha / demo build, built with Zig 0.16.0)."
-  extra_args=()
-  if [ -n "$stage" ]; then extra_args+=(--prerelease); fi
+  notes="Remielle Astral $version for the CNBetaWin$game_version client (demo build, built with Zig 0.16.0).
+
+![Launcher preview](https://github.com/$repo/releases/download/$tag/Preview.png)"
   if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
     say "Release $tag already exists, updating assets with --clobber..."
     gh release upload "$tag" --repo "$repo" --clobber \
-      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS Preview.png
   else
-    gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" "${extra_args[@]}" \
-      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS
+    gh release create "$tag" --repo "$repo" --title "Remielle Astral $version" --notes "$notes" --prerelease \
+      "remielle-astral-$name-linux-x86_64.zip" "remielle-astral-$name-windows-x86_64.zip" SHA256SUMS Preview.png
   fi
 else
   say "To publish:"
   say "  gh release create $tag --repo ${repo:-<owner>/<repo>} --title \"Remielle Astral $version\" \\"
   say "    $out/remielle-astral-$name-linux-x86_64.zip \\"
   say "    $out/remielle-astral-$name-windows-x86_64.zip \\"
-  say "    $out/SHA256SUMS"
+  say "    $out/SHA256SUMS $out/Preview.png"
 fi

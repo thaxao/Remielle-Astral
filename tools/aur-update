@@ -34,7 +34,7 @@ fi
 [ -n "$sum" ] || { echo "no checksum for $zip (pack or publish the release first)" >&2; exit 1; }
 
 old="$(sed -n 's/^pkgver=//p' "$pkg/PKGBUILD")"
-sed -i -e "s/^pkgver=.*/pkgver=$pkgver/" -e "s/^_ver=.*/_ver=$ver/" \
+sed -i -e "s/^pkgver=.*/pkgver=$pkgver/" -e "s/^_ver=.*/_ver=$ver/" -e "s/^_tag=.*/_tag=v$ver/" \
        -e "s/^sha256sums=.*/sha256sums=('$sum')/" "$pkg/PKGBUILD"
 [ "$old" = "$pkgver" ] || sed -i "s/^pkgrel=.*/pkgrel=1/" "$pkg/PKGBUILD"
 (cd "$pkg" && makepkg --printsrcinfo >.SRCINFO)
