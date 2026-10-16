@@ -120,3 +120,7 @@ curl -fsSL https://raw.githubusercontent.com/thaxao/Remielle-Astral/main/tools/i
 ## 📄 ใบอนุญาต (License)
 
 Remielle Astral ได้รับอนุญาตให้ใช้งานภายใต้เงื่อนไข [Apache License 2.0](LICENSE)
+
+## 🔔 การแจ้งเตือน Commit
+
+เมื่อ push โค้ดขึ้น GitHub ระบบจะแจ้งชื่อสาขา รายการ commit และผู้เขียนไปยัง Discord ผ่าน Webhook โดยตรง ไม่ต้องรันบอตหรือสคริปต์ค้างไว้ และไม่มีค่าเซิร์ฟเวอร์เพิ่มเติม
